@@ -183,14 +183,28 @@
   const TYPES={
     straight:{name:'Droite', open:[0,2]},
     turn:    {name:'Virage', open:[1,2]},
-    tee:     {name:'T', open:[1,2,3]},
+    tee:     {name:'T', open:[1,2,3]},        // N=fermé ; ouvert E,S,O
     cross:   {name:'Croisement', open:[0,1,2,3]},
-    loop:    {name:'Boucle', open:[2]}   // une seule ouverture : demi-tour
+    loop:    {name:'Boucle', open:[2]}
   };
-  // Tuiles « demi-tour » : entrée = sortie (même côté)
+  // Plus de tuiles à choix multiple : T et X sont désormais déterministes.
+  const MULTI={};
+  // Tuiles « demi-tour » : entrée = sortie
   const LOOP={loop:1};
-  // Tuiles à plusieurs sorties possibles depuis une entrée : T et X.
-  const MULTI={tee:1, cross:1};
+
+  // Table de routage déterministe : pour un (type, entrée RELATIVE à la tuile non pivotée),
+  // donne la sortie RELATIVE. Pour appliquer à une tuile pivotée, on convertit les directions
+  // absolues en relatives (en soustrayant la rotation), on regarde la table, puis on reconvertit.
+  // Convention : 0=N, 1=E, 2=S, 3=O.
+  const ROUTE={
+    // X (ouvertures N,E,S,O) : on continue toujours tout droit dans l'axe d'entrée
+    cross:{0:2, 1:3, 2:0, 3:1},
+    // T (base : ouvertures E,S,O ; barre horizontale E-O, pied vers le Sud)
+    // - Entrée E -> sort O (tout droit dans la barre)
+    // - Entrée O -> sort E (tout droit dans la barre)
+    // - Entrée S -> sort E (la courbe, vers la droite quand on remonte)
+    tee:{1:3, 3:1, 2:1}
+  };
 
   let selectedType='straight', eraseMode=false, running=false;
   let speedMult=1;        // multiplicateur de délai (2=lent, 1=normal, 0.5=rapide)
@@ -250,9 +264,31 @@
       1:`<line x1="5" y1="5" x2="10" y2="5" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`,
       3:`<line x1="0" y1="5" x2="5" y2="5" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`
     }[d]);
-    let s='';open.forEach(d=>s+=seg(d));
-    s+=`<rect x="3" y="3" width="4" height="4" fill="${road}"/>`;
-    open.forEach(d=>s+=dash(d));
+    let s='';
+    // Cas spécial T : rendu organique avec barre droite + courbe (pas les 3 segments en croix)
+    if(type==='tee'){
+      // Base (rot=0) : barre E-O horizontale + courbe Sud->Est.
+      // On dessine la barre comme un seul rectangle traversant la tuile,
+      // et la branche courbe via un Bezier large.
+      // Pour les autres rotations, on applique une rotation SVG autour du centre.
+      const angle=r*90;
+      s+=`<g transform="rotate(${angle} 5 5)">`;
+      // barre E-O (de l'Ouest à l'Est, complète)
+      s+=`<rect x="0" y="3" width="10" height="4" fill="${road}"/>`;
+      // branche courbe : du Sud (bord) jusqu'au point (7,5) qui rejoint la barre, en courbant
+      // largeur de bande : on dessine deux courbes parallèles formant un ruban
+      // bord intérieur de la branche
+      s+=`<path d="M3 10 Q3 5 7 5" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="butt"/>`;
+      // pointillés guide
+      s+=`<line x1="0" y1="5" x2="10" y2="5" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
+      s+=`<path d="M5 10 Q5 5 9 5" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
+      s+=`</g>`;
+      // pas de seg/dash classiques pour le T
+    }else{
+      open.forEach(d=>s+=seg(d));
+      s+=`<rect x="3" y="3" width="4" height="4" fill="${road}"/>`;
+      open.forEach(d=>s+=dash(d));
+    }
     // tuile boucle : un anneau au centre qui renvoie la voiture
     if(LOOP[type]){
       // anneau de route (couronne) centré, par-dessus le segment d'entrée
@@ -787,6 +823,7 @@
         return {d:exit, nr, nc, loop:true};
       }
 
+      const back=st.cameFrom;
       // teste si une sortie d mène vers une route effectivement connectée
       const reachable=d=>{
         const nr=st.r+DR[d], nc=st.c+DC[d];
@@ -795,14 +832,35 @@
         return !!next && openDirs(next).includes(OPP[d]);
       };
 
-      const ordered=orderedExits(cell);             // ordre défini par le joueur (1→2→3→4)
-      const back=st.cameFrom;                        // direction de demi-tour (interdite)
-      // sorties praticables (hors demi-tour)
-      const usable=ordered.filter(d=>d!==back && reachable(d));
+      // TUILE À ROUTAGE DÉTERMINISTE (T, X) : la sortie est définie par l'entrée.
+      // On convertit l'entrée absolue en relative (à la tuile non pivotée),
+      // on lit la table, puis on reconvertit en absolu.
+      if(ROUTE[cell.type] && back!==-1){
+        const relIn=(back - cell.rot + 4) % 4;
+        const relOut=ROUTE[cell.type][relIn];
+        if(relOut===undefined){
+          // entrée par un côté fermé : tracé incohérent
+          st.alive=false;running=false;
+          flash(`Voiture ${st.car.name} : entrée par un côté fermé 🔌`,'fail');
+          return false;
+        }
+        const d=(relOut + cell.rot) % 4;
+        if(!reachable(d)){
+          st.alive=false;running=false;
+          const nr=st.r+DR[d],nc=st.c+DC[d];
+          flash((nr<0||nr>=ROWS||nc<0||nc>=COLS)
+            ? `Voiture ${st.car.name} : la route sort du plateau ! 🚧`
+            : `Voiture ${st.car.name} : routes non connectées 🔌`,'fail');
+          return false;
+        }
+        return {d, nr:st.r+DR[d], nc:st.c+DC[d]};
+      }
 
+      // Cas général (droite, virage, premier pas) : une seule sortie possible hors demi-tour.
+      const usable=openDirs(cell).filter(d=>d!==back && reachable(d));
       if(!usable.length){
         st.alive=false;running=false;
-        const offboard=ordered.filter(d=>d!==back).some(d=>{
+        const offboard=openDirs(cell).filter(d=>d!==back).some(d=>{
           const nr=st.r+DR[d],nc=st.c+DC[d];
           return nr<0||nr>=ROWS||nc<0||nc>=COLS;
         });
@@ -811,30 +869,7 @@
           : `Voiture ${st.car.name} : impasse, routes non connectées 🔌`,'fail');
         return false;
       }
-
-      let d;
-      if(usable.length===1){
-        d=usable[0];                                 // une seule option : pas de choix
-      }else{
-        // CROISEMENT/T : on suit le pointeur courant dans l'ordre défini.
-        // On part du pointeur, on avance jusqu'à une sortie praticable (hors demi-tour),
-        // puis on fait avancer le pointeur d'un cran pour le prochain passage.
-        const key=st.r+','+st.c;
-        let ptr=(xPointer[key]||0) % ordered.length;
-        for(let i=0;i<ordered.length;i++){
-          const cand=ordered[(ptr+i)%ordered.length];
-          if(cand!==back && reachable(cand)){
-            d=cand;
-            const newPtr=(ptr+i+1)%ordered.length;
-            xPointer[key]=newPtr;                    // le sens tourne d'un cran
-            // fait tourner les chiffres affichés sur la tuile (synchronisé)
-            const cr=st.r, cc=st.c;
-            wait(0.5, ()=>redrawCellWithPointer(cr,cc,newPtr));
-            break;
-          }
-        }
-        if(d===undefined)d=usable[0]; // sécurité
-      }
+      const d=usable[0];
       return {d, nr:st.r+DR[d], nc:st.c+DC[d]};
     }
 

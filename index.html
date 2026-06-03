@@ -114,10 +114,11 @@
   }
   button:active{transform:scale(.95)}
   .btn-go{background:var(--green);grid-column:1/-1;font-size:15px;padding:13px}
-  .play-row{display:grid;grid-template-columns:2fr 1fr;gap:6px}
+  .play-row{display:grid;grid-template-columns:2fr 1fr 1fr;gap:6px}
   .play-row .btn-go{grid-column:auto}
-  .btn-pause{background:var(--accent);font-size:14px}
-  .btn-pause:disabled{opacity:.4}
+  .btn-pause{background:var(--accent);font-size:13px}
+  .btn-stop{background:#6c7a96;font-size:13px}
+  .btn-pause:disabled,.btn-stop:disabled{opacity:.4}
   .speed{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
   .speed-label{font-size:11px;color:var(--muted);font-weight:bold}
   .speed-btn{flex:1;padding:8px 4px;font-size:12px;background:var(--grid)}
@@ -152,6 +153,7 @@
     <div class="play-row">
       <button id="go" class="btn-go">▶ Lancer</button>
       <button id="pause" class="btn-pause" disabled>⏸ Pause</button>
+      <button id="stop" class="btn-stop" disabled>⏹ Stop</button>
     </div>
     <div class="speed" id="speed">
       <span class="speed-label">Vitesse :</span>
@@ -194,6 +196,7 @@
   let speedMult=1;        // multiplicateur de délai (2=lent, 1=normal, 0.5=rapide)
   let paused=false;       // état pause pendant la course
   let resumeFn=null;      // fonction à rappeler pour reprendre après pause
+  let raceToken=0;        // jeton incrémenté à chaque course ; permet d'annuler proprement
   const lastRot={};  // dernière orientation posée par type de tuile
   let longFired=false;  // évite que l'appui long déclenche aussi le clic
   // cell = {type, rot, order} ; order = permutation des côtés ouverts (priorité de sortie)
@@ -605,12 +608,13 @@
   // --- Cadence : délai de base d'un pas, modulé par la vitesse ---
   const BASE_STEP=360;
   const stepDelay=()=>Math.round(BASE_STEP*speedMult);
-  // wait() respecte la pause : à l'échéance, si on est en pause, on mémorise la
-  // continuation et on l'exécutera à la reprise (bouton Reprendre).
+  // wait() respecte la pause et le jeton de course (un STOP annule tous les wait en attente).
   function wait(factor, cb){
     const ms=Math.round(BASE_STEP*speedMult*factor);
+    const myToken=raceToken;
     setTimeout(()=>{
-      if(paused){ resumeFn=cb; }   // en pause : on attend la reprise
+      if(myToken!==raceToken) return;   // course annulée -> on ne fait rien
+      if(paused){ resumeFn=cb; }
       else { cb(); }
     }, ms);
   }
@@ -640,6 +644,30 @@
     if(!paused && resumeFn){ const f=resumeFn; resumeFn=null; f(); }
   };
 
+  // Bouton STOP : arrête tout, remet les voitures au départ et réinitialise l'affichage.
+  const stopBtn=document.getElementById('stop');
+  stopBtn.onclick=()=>{
+    if(!running)return;
+    raceToken++;              // annule tous les wait() en attente
+    running=false;paused=false;resumeFn=null;
+    pauseBtn.disabled=true;pauseBtn.textContent='⏸ Pause';
+    stopBtn.disabled=true;
+    // remet les voitures à leurs positions de départ
+    const s=step1();
+    carEls.forEach((el,i)=>{
+      el.classList.remove('crashed');
+      const car=CARS[i];
+      el.style.transition='transform .2s ease';
+      el.style.transform=`translate(${car.start.c*s}px,${car.start.r*s}px)`;
+      const body=el.querySelector('.body');
+      body.style.transition='transform .2s ease';
+      body.style.transform='';      // orientation neutre
+    });
+    document.querySelectorAll('.boom').forEach(b=>b.remove());
+    draw();                    // remet l'affichage des numéros dans l'ordre défini
+    flash('⏹ Arrêté. Ajuste l\u2019ordre des sorties puis relance ▶','win');
+  };
+
   document.getElementById('go').onclick=()=>{if(running)return;runRace();};
 
   const step1=()=>TS+1;
@@ -650,7 +678,9 @@
 
   function runRace(){
     running=true;paused=false;resumeFn=null;
+    raceToken++;            // nouvelle course : invalide les wait en attente d'une précédente
     pauseBtn.disabled=false;pauseBtn.textContent='⏸ Pause';
+    stopBtn.disabled=false;
     updateCarSpeed();
     flash('Les voitures roulent…',null);
     clearBooms();
@@ -658,7 +688,8 @@
     const s=step1();
     // termine proprement la course (réactive les contrôles)
     function endRace(){ running=false; paused=false; resumeFn=null;
-      pauseBtn.disabled=true; pauseBtn.textContent='⏸ Pause'; }
+      pauseBtn.disabled=true; pauseBtn.textContent='⏸ Pause';
+      stopBtn.disabled=true; }
     // pointeur de sortie partagé par case (croisements/T) : tourne à chaque passage,
     // toutes voitures confondues. Démarre sur la 1ère sortie de l'ordre défini.
     const xPointer={};

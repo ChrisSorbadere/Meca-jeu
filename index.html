@@ -93,7 +93,7 @@
 
   /* controls */
   .controls{width:100%;max-width:420px;display:flex;flex-direction:column;gap:8px}
-  .palette{display:grid;grid-template-columns:repeat(5,1fr);gap:5px}
+  .palette{display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
   .ptile{
     aspect-ratio:1;background:var(--panel);border-radius:10px;cursor:pointer;
     border:2px solid transparent;padding:5px 5px 0;display:flex;flex-direction:column;
@@ -183,7 +183,8 @@
   const TYPES={
     straight:{name:'Droite', open:[0,2]},
     turn:    {name:'Virage', open:[1,2]},
-    tee:     {name:'T', open:[1,2,3]},        // N=fermé ; ouvert E,S,O
+    tee:     {name:'T droite', open:[1,2,3]},  // courbe vers l'Est
+    tee_l:   {name:'T gauche', open:[1,2,3]},  // miroir : courbe vers l'Ouest
     cross:   {name:'Croisement', open:[0,1,2,3]},
     loop:    {name:'Boucle', open:[2]}
   };
@@ -197,11 +198,16 @@
   const ROUTE={
     // X : on continue toujours tout droit
     cross:{0:2, 1:3, 2:0, 3:1},
-    // T (base : barre E-O + courbe S->E)
+    // T droite (base : barre E-O + courbe S->E)
     // - E : alterne entre O (tout droit) et S (courbe)
     // - O : déterministe -> E
     // - S : déterministe -> E (courbe)
-    tee:{1:[3,2], 3:1, 2:1}
+    tee:{1:[3,2], 3:1, 2:1},
+    // T gauche (miroir : barre E-O + courbe S->O)
+    // - O : alterne entre E (tout droit) et S (courbe)
+    // - E : déterministe -> O
+    // - S : déterministe -> O (courbe)
+    tee_l:{3:[1,2], 1:3, 2:3}
   };
 
   let selectedType='straight', eraseMode=false, running=false;
@@ -263,25 +269,20 @@
       3:`<line x1="0" y1="5" x2="5" y2="5" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`
     }[d]);
     let s='';
-    // Cas spécial T : rendu organique avec barre droite + courbe (pas les 3 segments en croix)
-    if(type==='tee'){
-      // Base (rot=0) : barre E-O horizontale + courbe Sud->Est.
-      // On dessine la barre comme un seul rectangle traversant la tuile,
-      // et la branche courbe via un Bezier large.
-      // Pour les autres rotations, on applique une rotation SVG autour du centre.
+    // Cas spécial T (droite et gauche) : rendu organique avec barre droite + courbe
+    if(type==='tee' || type==='tee_l'){
       const angle=r*90;
-      s+=`<g transform="rotate(${angle} 5 5)">`;
-      // barre E-O (de l'Ouest à l'Est, complète)
+      // Pour tee_l (miroir), on applique un scaleX(-1) autour du centre
+      const mirror = (type==='tee_l') ? ' scale(-1 1) translate(-10 0)' : '';
+      s+=`<g transform="rotate(${angle} 5 5)${mirror}">`;
+      // barre E-O complète
       s+=`<rect x="0" y="3" width="10" height="4" fill="${road}"/>`;
-      // branche courbe : du Sud (bord) jusqu'au point (7,5) qui rejoint la barre, en courbant
-      // largeur de bande : on dessine deux courbes parallèles formant un ruban
-      // bord intérieur de la branche
+      // branche courbe S -> E
       s+=`<path d="M3 10 Q3 5 7 5" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="butt"/>`;
       // pointillés guide
       s+=`<line x1="0" y1="5" x2="10" y2="5" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
       s+=`<path d="M5 10 Q5 5 9 5" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
       s+=`</g>`;
-      // pas de seg/dash classiques pour le T
     }else{
       open.forEach(d=>s+=seg(d));
       s+=`<rect x="3" y="3" width="4" height="4" fill="${road}"/>`;
@@ -392,11 +393,12 @@
       const el=cells[r][c],cell=grid[r][c],badge=el.querySelector('.badge');
       el.innerHTML='';if(badge)el.appendChild(badge);
       if(cell){
-        // pour le T, on affiche par défaut les numéros sur les 2 sorties d'alternance
-        // (entrée par le côté courbe = E en relatif, sorties [O,S])
+        // pour le T (droite/gauche), on affiche par défaut les numéros sur les 2 sorties d'alternance
         let ord=null;
         if(cell.type==='tee'){
-          ord={relIn:1, ordered:ROUTE.tee[1]};   // [3, 2] = O en 1, S en 2
+          ord={relIn:1, ordered:ROUTE.tee[1]};       // entrée E : alterne O / S
+        }else if(cell.type==='tee_l'){
+          ord={relIn:3, ordered:ROUTE.tee_l[3]};     // entrée O : alterne E / S
         }
         el.insertAdjacentHTML('afterbegin',tileSVG(cell.type,cell.rot,ord));
       }
@@ -405,8 +407,8 @@
   // Redessine la tuile T avec les numéros sur les sorties de l'entrée `relIn` (alternance).
   // ptr = prochain index actif dans la liste des sorties alternantes.
   function redrawTeeWithPointer(r,c,relIn,ptr){
-    const cell=grid[r][c];if(!cell||cell.type!=='tee')return;
-    const spec=ROUTE.tee[relIn];
+    const cell=grid[r][c];if(!cell||(cell.type!=='tee'&&cell.type!=='tee_l'))return;
+    const spec=ROUTE[cell.type][relIn];
     if(!Array.isArray(spec))return;
     // sorties dans l'ordre courant : la prochaine en 1, l'autre en 2
     const n=spec.length;

@@ -390,40 +390,22 @@
       el.style.outlineColor=mk.car.color;
       el.innerHTML=`<span class="badge" style="color:${mk.car.color}">${mk.kind}${mk.car.id+1}</span>`;
     }
-    // Détection robuste de l'appui long :
-    // - on déclenche altAction() au bout de 450 ms
-    // - on bloque le click qui suit (suppressClick) pour ne pas pivoter par-dessus
-    let lpTimer=null, longTriggered=false, suppressClick=false;
+    // Sur Android et desktop, l'appui long / clic droit émet un événement `contextmenu`.
+    // On s'en sert directement, pas besoin de timer manuel parallèle (qui causait
+    // des doubles déclenchements annulant le swap).
+    let suppressClick=false;
     el.oncontextmenu=e=>{
       e.preventDefault();
       if(!running){
         suppressClick=true;
-        flash('🔎 contextmenu déclenché','win');
         altAction(r,c);
+        if(navigator.vibrate)navigator.vibrate(20);
       }
     };
     el.onclick=(e)=>{
-      if(suppressClick){suppressClick=false;flash('🔎 click ignoré (après long)','win');e.preventDefault();return;}
-      if(!running){flash('🔎 click court (cellClick)',null);cellClick(r,c);}
+      if(suppressClick){suppressClick=false;e.preventDefault();return;}
+      if(!running)cellClick(r,c);
     };
-    el.addEventListener('touchstart',e=>{
-      if(running)return;
-      longTriggered=false;
-      lpTimer=setTimeout(()=>{
-        lpTimer=null;longTriggered=true;suppressClick=true;
-        flash('🔎 timer 450ms -> altAction','win');
-        altAction(r,c);
-        if(navigator.vibrate)navigator.vibrate(20);
-      },450);
-    },{passive:true});
-    const cancelLP=(e)=>{
-      if(lpTimer){clearTimeout(lpTimer);lpTimer=null;}
-      // si l'appui long a été déclenché, on empêche aussi le click qui va suivre
-      if(longTriggered && e){e.preventDefault();}
-    };
-    el.addEventListener('touchend',cancelLP);
-    el.addEventListener('touchmove',cancelLP);
-    el.addEventListener('touchcancel',cancelLP);
     board.appendChild(el);cells[r][c]=el;
   }}
   // un élément voiture par CAR
@@ -451,14 +433,12 @@
   }
   // clic droit / appui long : sur T et X, change l'ordre des sorties ; sinon pivote
   function altAction(r,c){
-    const cur=grid[r][c];
-    if(!cur){flash(`🔎 altAction(${r},${c}) : pas de tuile`,null);return;}
+    const cur=grid[r][c];if(!cur)return;
     if(cur.type==='tee'||cur.type==='tee_l'){
+      // appui long sur un T : inverse l'ordre de l'alternance (1 ↔ 2)
       cur.swap=!cur.swap;
-      flash(`🔎 swap T = ${cur.swap}`,'win');
     }else{
       cur.rot=(cur.rot+1)%4;lastRot[cur.type]=cur.rot;
-      flash(`🔎 pivot ${cur.type} -> rot=${cur.rot}`,null);
     }
     draw();autosave();
   }

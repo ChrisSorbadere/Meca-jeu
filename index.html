@@ -93,14 +93,14 @@
 
   /* controls */
   .controls{width:100%;max-width:420px;display:flex;flex-direction:column;gap:8px}
-  .palette{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .palette{display:grid;grid-template-columns:repeat(6,1fr);gap:3px}
   .ptile{
-    aspect-ratio:1;background:var(--panel);border-radius:10px;cursor:pointer;
-    border:2px solid transparent;padding:5px 5px 0;display:flex;flex-direction:column;
+    height:56px;background:var(--panel);border-radius:8px;cursor:pointer;
+    border:2px solid transparent;padding:2px 2px 0;display:flex;flex-direction:column;
   }
   .ptile.active{border-color:var(--roadline);box-shadow:0 0 0 2px var(--roadline)}
   .ptile svg{width:100%;flex:1;min-height:0}
-  .pt-label{font-size:8px;text-align:center;color:var(--muted);padding:2px 0 1px;line-height:1.1}
+  .pt-label{font-size:7px;text-align:center;color:var(--muted);padding:1px 0;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
   .tools{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
   .diff{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -183,9 +183,9 @@
   const TYPES={
     straight:{name:'Droite', open:[0,2]},
     turn:    {name:'Virage', open:[1,2]},
-    tee:     {name:'T droite', open:[1,2,3]},  // courbe vers l'Est
-    tee_l:   {name:'T gauche', open:[1,2,3]},  // miroir : courbe vers l'Ouest
-    cross:   {name:'Croisement', open:[0,1,2,3]},
+    tee:     {name:'T-D', open:[1,2,3]},  // courbe vers l'Est
+    tee_l:   {name:'T-G', open:[1,2,3]},  // miroir : courbe vers l'Ouest
+    cross:   {name:'Croisem.', open:[0,1,2,3]},
     loop:    {name:'Boucle', open:[2]}
   };
   // Plus de tuiles à choix multiple : T et X sont désormais déterministes.

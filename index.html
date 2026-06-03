@@ -102,7 +102,33 @@
   .ptile svg{width:100%;flex:1;min-height:0}
   .pt-label{font-size:7px;text-align:center;color:var(--muted);padding:1px 0;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-  .tools{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .tools{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+  .tools button{font-size:11px;padding:9px 2px}
+  /* Modale Circuits */
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;
+    display:none;align-items:center;justify-content:center;padding:16px}
+  .modal-bg.open{display:flex}
+  .modal{background:var(--panel);border-radius:14px;padding:16px;max-width:340px;width:100%;
+    max-height:85vh;display:flex;flex-direction:column;gap:10px;
+    box-shadow:0 12px 30px rgba(0,0,0,.5)}
+  .modal h3{font-size:16px}
+  .modal .close-x{position:absolute;background:none;font-size:20px;padding:4px 8px}
+  .modal-header{display:flex;justify-content:space-between;align-items:center}
+  .save-row{display:flex;gap:6px}
+  .save-row input{flex:1;background:var(--grid);color:var(--txt);border:none;
+    border-radius:8px;padding:9px;font-family:inherit;font-size:13px}
+  .save-row button{background:var(--green);font-size:12px;padding:9px 12px}
+  .saves-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:5px;
+    background:var(--bg);border-radius:8px;padding:6px;min-height:120px}
+  .save-item{display:flex;align-items:center;gap:6px;background:var(--grid);
+    border-radius:8px;padding:8px 10px}
+  .save-item .name{flex:1;font-size:13px;font-weight:bold;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .save-item .date{font-size:9px;color:var(--muted)}
+  .save-item button{font-size:11px;padding:6px 8px}
+  .load-btn{background:var(--roadline);color:#1a1a1a}
+  .del-btn{background:var(--accent)}
+  .saves-empty{text-align:center;color:var(--muted);font-size:12px;padding:20px 0}
   .diff{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
   .diff-label{font-size:11px;color:var(--muted);font-weight:bold}
   .diff-btn{flex:1;padding:8px 4px;font-size:12px;background:var(--grid)}
@@ -149,6 +175,7 @@
       <button id="generate">🎲 Générer</button>
       <button id="erase">🧽 Gomme</button>
       <button id="clear">🗑️ Effacer</button>
+      <button id="save">💾 Circuits</button>
     </div>
     <div class="play-row">
       <button id="go" class="btn-go">▶ Lancer</button>
@@ -163,6 +190,21 @@
     </div>
     <div id="msg"></div>
     <p class="hint">🚗 <b>verte</b> A1→B1 &nbsp;•&nbsp; 🚙 <b>bleue</b> A2→B2 &nbsp;— réseau partagé. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : ordre des sorties. <b>Générer</b> crée 2 parcours. Évite les collisions 💥&nbsp;!</p>
+  </div>
+
+  <!-- Modale Circuits -->
+  <div class="modal-bg" id="modal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>💾 Mes circuits</h3>
+        <button class="close-x" id="modal-close">✕</button>
+      </div>
+      <div class="save-row">
+        <input type="text" id="save-name" placeholder="Nom du circuit…" maxlength="30">
+        <button id="save-btn">Enregistrer</button>
+      </div>
+      <div class="saves-list" id="saves-list"></div>
+    </div>
   </div>
 
 <script>
@@ -209,6 +251,15 @@
     // - S : déterministe -> O (courbe)
     tee_l:{3:[1,2], 1:3, 2:3}
   };
+
+  // Retourne l'ordre courant des sorties d'alternance pour un T (selon swap).
+  // Renvoie aussi le relIn (côté d'entrée concerné par l'alternance) pour ce type.
+  function teeAlternance(cell){
+    const relIn = cell.type==='tee' ? 1 : 3;          // E pour tee, O pour tee_l
+    const base  = ROUTE[cell.type][relIn];            // [3,2] ou [1,2]
+    const ord   = cell.swap ? [base[1], base[0]] : base;
+    return {relIn, ordered:ord};
+  }
 
   let selectedType='straight', eraseMode=false, running=false;
   let speedMult=1;        // multiplicateur de délai (2=lent, 1=normal, 0.5=rapide)
@@ -340,15 +391,28 @@
       el.innerHTML=`<span class="badge" style="color:${mk.car.color}">${mk.kind}${mk.car.id+1}</span>`;
     }
     el.oncontextmenu=e=>{e.preventDefault();if(!running)altAction(r,c);};
-    el.onclick=()=>{if(longFired){longFired=false;return;}if(!running)cellClick(r,c);};
-    // appui long (tactile) -> altAction
-    let lpTimer=null;
+    // Détection robuste de l'appui long :
+    // - on déclenche altAction() au bout de 450 ms
+    // - on bloque le click qui suit (suppressClick) pour ne pas pivoter par-dessus
+    let lpTimer=null, longTriggered=false, suppressClick=false;
+    el.onclick=(e)=>{
+      if(suppressClick){suppressClick=false;e.preventDefault();return;}
+      if(!running)cellClick(r,c);
+    };
     el.addEventListener('touchstart',e=>{
       if(running)return;
-      lpTimer=setTimeout(()=>{lpTimer=null;longFired=true;altAction(r,c);
-        if(navigator.vibrate)navigator.vibrate(20);},450);
+      longTriggered=false;
+      lpTimer=setTimeout(()=>{
+        lpTimer=null;longTriggered=true;suppressClick=true;
+        altAction(r,c);
+        if(navigator.vibrate)navigator.vibrate(20);
+      },450);
     },{passive:true});
-    const cancelLP=()=>{if(lpTimer){clearTimeout(lpTimer);lpTimer=null;}};
+    const cancelLP=(e)=>{
+      if(lpTimer){clearTimeout(lpTimer);lpTimer=null;}
+      // si l'appui long a été déclenché, on empêche aussi le click qui va suivre
+      if(longTriggered && e){e.preventDefault();}
+    };
     el.addEventListener('touchend',cancelLP);
     el.addEventListener('touchmove',cancelLP);
     el.addEventListener('touchcancel',cancelLP);
@@ -364,7 +428,7 @@
   });
 
   function cellClick(r,c){
-    if(eraseMode){grid[r][c]=null;draw();return;}
+    if(eraseMode){grid[r][c]=null;draw();autosave();return;}
     const cur=grid[r][c];
     if(cur && cur.type===selectedType){
       // re-touche = pivoter (pour toutes les tuiles)
@@ -375,17 +439,18 @@
       // pose : reprend la dernière orientation utilisée pour ce type
       grid[r][c]={type:selectedType,rot:(lastRot[selectedType]||0),order:0};
     }
-    draw();
+    draw();autosave();
   }
   // clic droit / appui long : sur T et X, change l'ordre des sorties ; sinon pivote
   function altAction(r,c){
     const cur=grid[r][c];if(!cur)return;
-    if(MULTI[cur.type]){
-      cur.order=((cur.order||0)+1)%nbOrders(cur);
+    if(cur.type==='tee'||cur.type==='tee_l'){
+      // appui long sur un T : inverse l'ordre de l'alternance (1 ↔ 2)
+      cur.swap=!cur.swap;
     }else{
       cur.rot=(cur.rot+1)%4;lastRot[cur.type]=cur.rot;
     }
-    draw();
+    draw();autosave();
   }
 
   function draw(){
@@ -395,10 +460,8 @@
       if(cell){
         // pour le T (droite/gauche), on affiche par défaut les numéros sur les 2 sorties d'alternance
         let ord=null;
-        if(cell.type==='tee'){
-          ord={relIn:1, ordered:ROUTE.tee[1]};       // entrée E : alterne O / S
-        }else if(cell.type==='tee_l'){
-          ord={relIn:3, ordered:ROUTE.tee_l[3]};     // entrée O : alterne E / S
+        if(cell.type==='tee'||cell.type==='tee_l'){
+          ord=teeAlternance(cell);
         }
         el.insertAdjacentHTML('afterbegin',tileSVG(cell.type,cell.rot,ord));
       }
@@ -408,16 +471,141 @@
   // ptr = prochain index actif dans la liste des sorties alternantes.
   function redrawTeeWithPointer(r,c,relIn,ptr){
     const cell=grid[r][c];if(!cell||(cell.type!=='tee'&&cell.type!=='tee_l'))return;
-    const spec=ROUTE[cell.type][relIn];
-    if(!Array.isArray(spec))return;
-    // sorties dans l'ordre courant : la prochaine en 1, l'autre en 2
+    const raw=ROUTE[cell.type][relIn];
+    if(!Array.isArray(raw))return;
+    // applique swap : ordre de base inversé si la tuile a été basculée
+    const spec = cell.swap ? [raw[1], raw[0]] : raw;
     const n=spec.length;
-    const ordered=spec.map((_,i)=>spec[(ptr+i)%n]);
+    const ordered=spec.map((_,i)=>spec[(ptr+i)%n]); // prochaine = 1, autre = 2
     const el=cells[r][c],badge=el.querySelector('.badge');
     el.innerHTML='';if(badge)el.appendChild(badge);
     el.insertAdjacentHTML('afterbegin',tileSVG(cell.type,cell.rot,{relIn, ordered}));
   }
   draw();
+
+  // ============== SYSTÈME DE SAUVEGARDE ==============
+  // Format compact : chaque case = "type:rot:swap" séparés par "|".
+  const TYPE_CODE={straight:'s',turn:'t',tee:'T',tee_l:'L',cross:'x',loop:'o'};
+  const CODE_TYPE=Object.fromEntries(Object.entries(TYPE_CODE).map(([k,v])=>[v,k]));
+  function serializeGrid(){
+    const cells=[];
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+      const g=grid[r][c];
+      if(!g) cells.push('');
+      else cells.push(TYPE_CODE[g.type]+g.rot+(g.swap?'s':''));
+    }
+    return cells.join('|');
+  }
+  function deserializeGrid(str){
+    if(!str || typeof str!=='string')return false;
+    const parts=str.split('|');
+    if(parts.length!==ROWS*COLS)return false;
+    const newGrid=Array.from({length:ROWS},()=>Array(COLS).fill(null));
+    for(let i=0;i<parts.length;i++){
+      const p=parts[i]; if(!p)continue;
+      const type=CODE_TYPE[p[0]]; if(!type)continue;
+      const rot=parseInt(p[1],10); if(isNaN(rot))continue;
+      const swap=p.length>2 && p[2]==='s';
+      const r=Math.floor(i/COLS), c=i%COLS;
+      newGrid[r][c]={type,rot,order:0,swap};
+    }
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)grid[r][c]=newGrid[r][c];
+    return true;
+  }
+
+  const AUTOSAVE_KEY='meca-autosave';
+  const SAVES_KEY='meca-saves';
+  let autosaveTimer=null;
+  function autosave(){
+    if(autosaveTimer)clearTimeout(autosaveTimer);
+    autosaveTimer=setTimeout(()=>{
+      try{localStorage.setItem(AUTOSAVE_KEY,serializeGrid());}catch(e){}
+    },300);
+  }
+  function loadAutosave(){
+    try{
+      const s=localStorage.getItem(AUTOSAVE_KEY);
+      if(s && deserializeGrid(s)){draw();}
+    }catch(e){}
+  }
+  function loadSaves(){
+    try{const s=localStorage.getItem(SAVES_KEY);return s?JSON.parse(s):[];}
+    catch(e){return [];}
+  }
+  function writeSaves(arr){
+    try{localStorage.setItem(SAVES_KEY,JSON.stringify(arr));}catch(e){}
+  }
+  function saveCircuit(name){
+    name=name.trim();
+    if(!name){flash('Donne un nom au circuit','fail');return;}
+    const saves=loadSaves();
+    const existing=saves.findIndex(s=>s.name===name);
+    const data={name, grid:serializeGrid(), date:new Date().toISOString()};
+    if(existing>=0) saves[existing]=data; else saves.push(data);
+    saves.sort((a,b)=>b.date.localeCompare(a.date));
+    writeSaves(saves);
+    refreshSavesList();
+    flash(`💾 Circuit "${name}" enregistré`,'win');
+  }
+  function deleteCircuit(name){
+    const saves=loadSaves().filter(s=>s.name!==name);
+    writeSaves(saves);
+    refreshSavesList();
+  }
+  function loadCircuit(name){
+    const saves=loadSaves();
+    const s=saves.find(x=>x.name===name);
+    if(!s)return;
+    if(deserializeGrid(s.grid)){
+      draw(); autosave();
+      flash(`📂 "${name}" chargé`,'win');
+      closeModal();
+    }
+  }
+  function refreshSavesList(){
+    const list=document.getElementById('saves-list');
+    const saves=loadSaves();
+    if(!saves.length){
+      list.innerHTML='<div class="saves-empty">Aucun circuit enregistré.<br>Donne un nom et clique sur Enregistrer.</div>';
+      return;
+    }
+    list.innerHTML='';
+    saves.forEach(s=>{
+      const d=new Date(s.date);
+      const dStr=d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})+' '+
+                 d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+      const item=document.createElement('div');
+      item.className='save-item';
+      const info=document.createElement('div');
+      info.style.cssText='flex:1;min-width:0';
+      const nm=document.createElement('div');nm.className='name';nm.textContent=s.name;
+      const dt=document.createElement('div');dt.className='date';dt.textContent=dStr;
+      info.appendChild(nm);info.appendChild(dt);
+      const load=document.createElement('button');load.className='load-btn';load.textContent='Charger';
+      load.onclick=()=>loadCircuit(s.name);
+      const del=document.createElement('button');del.className='del-btn';del.textContent='✕';
+      del.onclick=()=>{if(confirm(`Supprimer "${s.name}" ?`))deleteCircuit(s.name);};
+      item.appendChild(info);item.appendChild(load);item.appendChild(del);
+      list.appendChild(item);
+    });
+  }
+  function openModal(){
+    document.getElementById('modal').classList.add('open');
+    refreshSavesList();
+    document.getElementById('save-name').value='';
+  }
+  function closeModal(){document.getElementById('modal').classList.remove('open');}
+
+  document.getElementById('save').onclick=openModal;
+  document.getElementById('modal-close').onclick=closeModal;
+  document.getElementById('modal').onclick=(e)=>{
+    if(e.target.id==='modal')closeModal();
+  };
+  document.getElementById('save-btn').onclick=()=>{
+    saveCircuit(document.getElementById('save-name').value);
+  };
+
+  loadAutosave();
 
   const eraseBtn=document.getElementById('erase');
 
@@ -634,7 +822,7 @@
       const g=grid[r][c];if(g&&MULTI[g.type])inter++;
     }
     flash(`Circuit généré (${inter} intersection${inter>1?'s':''}) ! Modifie ou lance ▶`,'win');
-    draw();
+    draw();autosave();
   }
   function dirTo(r,c,nr,nc){
     if(nr<r)return 0; if(nr>r)return 2; if(nc>c)return 1; return 3;
@@ -644,7 +832,7 @@
   eraseBtn.onclick=()=>{eraseMode=!eraseMode;eraseBtn.style.outline=eraseMode?'2px solid var(--accent)':'';};
   document.getElementById('clear').onclick=()=>{if(running)return;
     for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)grid[r][c]=null;
-    flash('',null);draw();};
+    flash('',null);draw();autosave();};
 
   function flash(t,cls){const m=document.getElementById('msg');m.textContent=t;m.className=cls||'';}
 
@@ -852,13 +1040,14 @@
         }
         let relOut;
         if(Array.isArray(relOutSpec)){
-          // alternance : on prend la sortie au rang du compteur, puis on avance
-          const k=st.r+','+st.c+'/'+relIn;     // clé liée à la case ET au côté d'entrée
-          const p=(xPointer[k]||0) % relOutSpec.length;
-          relOut=relOutSpec[p];
-          const newPtr=(p+1) % relOutSpec.length;
+          // alternance : on prend la sortie au rang du compteur, puis on avance.
+          // Si la tuile a swap=true, l'ordre est inversé.
+          const spec = cell.swap ? [relOutSpec[1], relOutSpec[0]] : relOutSpec;
+          const k=st.r+','+st.c+'/'+relIn;
+          const p=(xPointer[k]||0) % spec.length;
+          relOut=spec[p];
+          const newPtr=(p+1) % spec.length;
           xPointer[k]=newPtr;
-          // redraw différé pour faire tourner les chiffres visibles
           const cr=st.r, cc=st.c;
           wait(0.5, ()=>redrawTeeWithPointer(cr,cc,relIn,newPtr));
         }else{

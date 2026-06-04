@@ -89,6 +89,22 @@
   }
   .car-sprite.crashed .body{animation:shake .3s ease-in-out 3}
   @keyframes shake{0%,100%{transform:rotate(0)}25%{transform:rotate(-18deg)}75%{transform:rotate(18deg)}}
+  /* débris persistants après explosion */
+  .debris{
+    position:absolute;width:var(--ts);height:var(--ts);z-index:25;pointer-events:none;
+    display:flex;align-items:center;justify-content:center;
+    font-size:calc(var(--ts) * .55);opacity:.85;
+    animation:debris-in .4s ease-out;
+  }
+  @keyframes debris-in{0%{opacity:0;transform:scale(0)}100%{opacity:.85;transform:scale(1)}}
+  /* grosse explosion (collision) */
+  .boom.big{font-size:calc(var(--ts) * 1.4);animation:boom 1s ease-out forwards}
+  /* fond rouge clignotant : cul-de-sac */
+  .cell.deadend-flash{animation:deadend 0.6s ease-in-out infinite}
+  @keyframes deadend{
+    0%,100%{background:var(--gridline)}
+    50%{background:#c83a3a}
+  }
 
 
   /* controls */
@@ -610,18 +626,65 @@
     };
   });
 
-  // ---- Génération automatique de deux parcours ----
-  // Dérive le {type,rot} dont les ouvertures (absolues) == ensemble dirs donné
+  // Dérive {type,rot} dont les ouvertures == dirs. Priorité aux tuiles NON directionnelles
+  // (straight, turn, cross) ; le T dirigé n'est utilisé qu'en dernier recours (3 ouvertures).
   function tileFromDirs(dirs){
     const set=[...new Set(dirs)].sort((a,b)=>a-b);
-    for(const type of Object.keys(TYPES)){
-      for(let rot=0;rot<4;rot++){
-        const open=TYPES[type].open.map(d=>(d+rot)%4).sort((a,b)=>a-b);
+    for(const type of ['straight','turn','cross','loop']){
+      for(let rt=0;rt<4;rt++){
+        const open=TYPES[type].open.map(d=>(d+rt)%4).sort((a,b)=>a-b);
         if(open.length===set.length && open.every((v,i)=>v===set[i]))
-          return {type,rot,order:0};
+          return {type,rot:rt,order:0};
       }
     }
-    return null; // combinaison à 1 ou 3-sans-T impossible : géré en amont
+    for(const type of ['tee','tee_l']){
+      for(let rt=0;rt<4;rt++){
+        const open=TYPES[type].open.map(d=>(d+rt)%4).sort((a,b)=>a-b);
+        if(open.length===set.length && open.every((v,i)=>v===set[i]))
+          return {type,rot:rt,order:0};
+      }
+    }
+    return null;
+  }
+
+  // Simule le trajet d'une voiture sur une grille candidate (sans animation).
+  // Retourne true si la voiture atteint son arrivée, false sinon (cul-de-sac/boucle/erreur).
+  function simulateCar(g, car){
+    let r=car.start.r,c=car.start.c,back=-1,steps=0;const xptr={};
+    while(steps++<400){
+      const cell=g[r][c];if(!cell)return false;
+      if(r===car.end.r&&c===car.end.c)return true;
+      const reach=d=>{const nr=r+DR[d],nc=c+DC[d];
+        if(nr<0||nr>=ROWS||nc<0||nc>=COLS)return false;
+        const nx=g[nr][nc];return !!nx&&openDirs(nx).includes(OPP[d]);};
+      if(LOOP[cell.type]){
+        const ex=openDirs(cell)[0];
+        if(back!==ex&&back!==-1)return false;
+        if(!reach(ex))return false;
+        r+=DR[ex];c+=DC[ex];back=OPP[ex];continue;
+      }
+      let d;
+      if(ROUTE[cell.type]&&back!==-1){
+        const ri=(back-cell.rot+4)%4;const spec=ROUTE[cell.type][ri];
+        if(spec===undefined)return false;
+        if(Array.isArray(spec)){const k=r+','+c+'/'+ri;const p=(xptr[k]||0)%spec.length;
+          d=(spec[p]+cell.rot)%4;xptr[k]=p+1;}
+        else d=(spec+cell.rot)%4;
+        if(!reach(d))return false;
+      }else{
+        const u=openDirs(cell).filter(x=>x!==back&&reach(x));
+        if(!u.length)return false;d=u[0];
+      }
+      r+=DR[d];c+=DC[d];back=OPP[d];
+    }
+    return false;
+  }
+  function gridFromDirs(dbc){
+    const g=Array.from({length:ROWS},()=>Array(COLS).fill(null));
+    for(const k in dbc){const[r,c]=k.split(',').map(Number);
+      let dirs=[...dbc[k]];if(dirs.length===1)dirs.push((dirs[0]+2)%4);
+      const t=tileFromDirs(dirs);if(t)g[r][c]=t;}
+    return g;
   }
 
   // marche aléatoire de start à end sur la grille, renvoie une liste de cases
@@ -664,155 +727,72 @@
     retry=retry||0;
     const cfg={
       easy:  {sinuosity:1.2, branches:0},
-      medium:{sinuosity:3,   branches:5},
-      hard:  {sinuosity:6,   branches:14}
+      medium:{sinuosity:3,   branches:6},
+      hard:  {sinuosity:6,   branches:16}
     }[difficulty];
-    const p1=buildPath(CARS[0].start,CARS[0].end,cfg.sinuosity);
-    const p2=buildPath(CARS[1].start,CARS[1].end,cfg.sinuosity);
-    if(!p1||!p2){return flash('Génération difficile, réessaie 🎲','fail');}
-
-    // accumule les directions ouvertes par case (union des deux chemins)
-    const dirsByCell={};
     const key=(r,c)=>r+','+c;
-    function link(r,c,d){ // ouvre la direction d sur la case (r,c)
-      const k=key(r,c);
-      if(!dirsByCell[k])dirsByCell[k]=new Set();
-      dirsByCell[k].add(d);
-    }
-    function addPath(path){
-      for(let i=0;i<path.length;i++){
-        const {r,c}=path[i];
-        if(i>0){const p=path[i-1];link(r,c,dirTo(r,c,p.r,p.c));}
-        if(i<path.length-1){const n=path[i+1];link(r,c,dirTo(r,c,n.r,n.c));}
+
+    // Plusieurs tentatives : on ne garde qu'un circuit où les 2 voitures ARRIVENT.
+    for(let attempt=0; attempt<40; attempt++){
+      const p1=buildPath(CARS[0].start,CARS[0].end,cfg.sinuosity);
+      const p2=buildPath(CARS[1].start,CARS[1].end,cfg.sinuosity);
+      if(!p1||!p2) continue;
+
+      const dbc={};
+      const link=(r,c,d)=>{const k=key(r,c);if(!dbc[k])dbc[k]=new Set();dbc[k].add(d);};
+      const addPath=path=>{for(let i=0;i<path.length;i++){const {r,c}=path[i];
+        if(i>0)link(r,c,dirTo(r,c,path[i-1].r,path[i-1].c));
+        if(i<path.length-1)link(r,c,dirTo(r,c,path[i+1].r,path[i+1].c));}};
+      addPath(p1);addPath(p2);
+
+      const prot=new Set();
+      CARS.forEach(c=>{prot.add(key(c.start.r,c.start.c));prot.add(key(c.end.r,c.end.c));});
+
+      // le circuit de base (2 chemins) doit déjà être jouable
+      let g=gridFromDirs(dbc);
+      if(!simulateCar(g,CARS[0])||!simulateCar(g,CARS[1])) continue;
+
+      // ajout incrémental d'intersections, validé par simulation à chaque étape
+      const MOVE={0:[-1,0],1:[0,1],2:[1,0],3:[0,-1]};
+      const isOcc=(r,c)=>!!dbc[key(r,c)];
+      const canOpen=(r,c)=>{if(prot.has(key(r,c)))return false;const e=dbc[key(r,c)];return !e||e.size<4;};
+      function findConn(sr,sc){
+        const sk=key(sr,sc);const q=[{r:sr,c:sc,path:[[sr,sc]]}];const seen=new Set([sk]);let st=0;
+        while(q.length&&st++<200){const cur=q.shift();const ord=[0,1,2,3].sort(()=>Math.random()-0.5);
+          for(const d of ord){const nr=cur.r+MOVE[d][0],nc=cur.c+MOVE[d][1];
+            if(nr<0||nr>=ROWS||nc<0||nc>=COLS)continue;const nk=key(nr,nc);if(seen.has(nk))continue;
+            if(isOcc(nr,nc)){if(nk!==sk&&cur.path.length>=2&&canOpen(nr,nc))return[...cur.path,[nr,nc]];continue;}
+            if(cur.path.length<=4){seen.add(nk);q.push({r:nr,c:nc,path:[...cur.path,[nr,nc]]});}}}
+        return null;
       }
-    }
-    addPath(p1);addPath(p2);
+      let added=0,att=0;
+      while(added<cfg.branches && att++<cfg.branches*20){
+        const occ=Object.keys(dbc).filter(k=>canOpen(...k.split(',').map(Number)));
+        if(!occ.length)break;
+        const [sr,sc]=occ[Math.floor(Math.random()*occ.length)].split(',').map(Number);
+        const conn=findConn(sr,sc);
+        if(!conn)continue;
+        const backup={};for(const k in dbc)backup[k]=new Set(dbc[k]);
+        for(let i=0;i<conn.length-1;i++){const[r,c]=conn[i],[nr,nc]=conn[i+1];
+          const d=dirTo(r,c,nr,nc);link(r,c,d);link(nr,nc,(d+2)%4);}
+        g=gridFromDirs(dbc);
+        if(simulateCar(g,CARS[0])&&simulateCar(g,CARS[1])){added++;}
+        else{for(const k in dbc)delete dbc[k];for(const k in backup)dbc[k]=backup[k];}
+      }
 
-    // --- Ramifications SANS impasse : on relie deux cases déjà sur le réseau ---
-    // Un segment part d'une case occupée, traverse des cases libres, et rejoint
-    // une AUTRE case occupée. Les deux extrémités deviennent des intersections,
-    // et comme tout est connecté des deux côtés, aucune voie sans issue.
-    const MOVE={0:[-1,0],1:[0,1],2:[1,0],3:[0,-1]};
-    const protectedCells=new Set(); // pas d'intersection sur départs/arrivées
-    CARS.forEach(car=>{protectedCells.add(key(car.start.r,car.start.c));
-                       protectedCells.add(key(car.end.r,car.end.c));});
-    const isOccupied=(r,c)=>!!dirsByCell[key(r,c)];
-    const canOpen=(r,c)=>{ // une case peut-elle accueillir une ouverture de plus ?
-      if(protectedCells.has(key(r,c)))return false;
-      const ex=dirsByCell[key(r,c)];
-      return !ex || ex.size<4;
-    };
-
-    // recherche d'un chemin court (BFS) entre deux cases occupées, via cases LIBRES
-    function findConnector(sr,sc){
-      // BFS depuis (sr,sc) ; on cherche à atteindre une autre case occupée
-      // en ne traversant que des cases libres entre les deux extrémités.
-      const startK=key(sr,sc);
-      const q=[{r:sr,c:sc,path:[[sr,sc]]}];
-      const seen=new Set([startK]);
-      let steps=0;
-      while(q.length && steps++<300){
-        const cur=q.shift();
-        const order=[0,1,2,3].sort(()=>Math.random()-0.5); // exploration aléatoire
-        for(const d of order){
-          const nr=cur.r+MOVE[d][0], nc=cur.c+MOVE[d][1];
-          if(nr<0||nr>=ROWS||nc<0||nc>=COLS)continue;
-          const nk=key(nr,nc);
-          if(seen.has(nk))continue;
-          // si on atteint une AUTRE case occupée (et pas protégée) -> connexion trouvée
-          if(isOccupied(nr,nc)){
-            if(nk!==startK && cur.path.length>=2 && canOpen(nr,nc)){
-              return [...cur.path,[nr,nc]];
-            }
-            continue; // on ne traverse pas une case occupée intermédiaire
-          }
-          // case libre : on peut la traverser, max ~4 de long
-          if(cur.path.length<=4){
-            seen.add(nk);
-            q.push({r:nr,c:nc,path:[...cur.path,[nr,nc]]});
-          }
+      g=gridFromDirs(dbc);
+      if(simulateCar(g,CARS[0])&&simulateCar(g,CARS[1])){
+        for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)grid[r][c]=g[r][c];
+        let inter=0;
+        for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+          const t=grid[r][c];if(t&&(t.type==='tee'||t.type==='tee_l'||t.type==='cross'))inter++;
         }
-      }
-      return null;
-    }
-    // pose un connecteur (liste de cases) en ouvrant les liens entre cases consécutives
-    function layConnector(p){
-      for(let i=0;i<p.length-1;i++){
-        const [r,c]=p[i], [nr,nc]=p[i+1];
-        const d=dirTo(r,c,nr,nc);
-        link(r,c,d); link(nr,nc,(d+2)%4);
+        flash(`Circuit g\u00e9n\u00e9r\u00e9 (${inter} intersection${inter>1?'s':''}) \u2014 jouable ! \u25b6`,'win');
+        draw();autosave();
+        return;
       }
     }
-
-    let added=0, attempts=0;
-    while(added<cfg.branches && attempts++<cfg.branches*30){
-      const occ=Object.keys(dirsByCell).filter(k=>canOpen(...k.split(',').map(Number)));
-      if(!occ.length)break;
-      const [sr,sc]=occ[Math.floor(Math.random()*occ.length)].split(',').map(Number);
-      const conn=findConnector(sr,sc);
-      if(conn){ layConnector(conn); added++; }
-    }
-
-    // --- ÉLAGAGE : supprime toute impasse pour garantir un circuit 100% viable ---
-    // Règle : une ouverture n'est valide que si la case voisine a l'ouverture réciproque.
-    // Une case qui se retrouve avec <2 ouvertures valides est une impasse -> on l'élague,
-    // ce qui peut en créer d'autres : on répète jusqu'à stabilité.
-    // Exception : les départs/arrivées peuvent n'avoir qu'1 ouverture (extrémités légitimes).
-    const isEndpoint=k=>protectedCells.has(k)||
-      CARS.some(c=>k===key(c.start.r,c.start.c)||k===key(c.end.r,c.end.c));
-    let changed=true;
-    while(changed){
-      changed=false;
-      for(const k in dirsByCell){
-        const [r,c]=k.split(',').map(Number);
-        const set=dirsByCell[k];
-        for(const d of [...set]){
-          const nr=r+MOVE[d][0], nc=c+MOVE[d][1];
-          const nk=key(nr,nc);
-          const neighbor=dirsByCell[nk];
-          // ouverture vers le vide ou voisin sans réciprocité -> on la retire
-          if(nr<0||nr>=ROWS||nc<0||nc>=COLS||!neighbor||!neighbor.has((d+2)%4)){
-            set.delete(d); changed=true;
-          }
-        }
-        // case devenue cul-de-sac (1 ouverture) et pas une extrémité légitime -> on vide
-        const minOpen = isEndpoint(k)?1:2;
-        if(set.size>0 && set.size<minOpen){
-          // retire les liens réciproques chez les voisins puis supprime la case
-          for(const d of [...set]){
-            const nr=r+MOVE[d][0], nc=c+MOVE[d][1], nk=key(nr,nc);
-            if(dirsByCell[nk]){dirsByCell[nk].delete((d+2)%4);}
-          }
-          delete dirsByCell[k]; changed=true;
-        } else if(set.size===0){
-          delete dirsByCell[k]; changed=true;
-        }
-      }
-    }
-
-    // Vérifie que chaque départ/arrivée a bien gardé sa connexion ; sinon on régénère.
-    const reachOK = CARS.every(car=>
-      dirsByCell[key(car.start.r,car.start.c)] && dirsByCell[key(car.end.r,car.end.c)]);
-    if(!reachOK){ return retry<8 ? generate(retry+1) : flash('Réessaie la génération 🎲','fail'); }
-
-    // pose les tuiles
-    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)grid[r][c]=null;
-    for(const k in dirsByCell){
-      const [r,c]=k.split(',').map(Number);
-      let dirs=[...dirsByCell[k]];
-      // extrémité légitime à 1 ouverture (A/B) -> prolonge en droite vers l'intérieur
-      if(dirs.length===1){dirs.push((dirs[0]+2)%4);}
-      const t=tileFromDirs(dirs);
-      if(t)grid[r][c]=t;
-    }
-
-    // compte les intersections pour info
-    let inter=0;
-    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
-      const g=grid[r][c];if(g&&MULTI[g.type])inter++;
-    }
-    flash(`Circuit généré (${inter} intersection${inter>1?'s':''}) ! Modifie ou lance ▶`,'win');
-    draw();autosave();
+    flash('G\u00e9n\u00e9ration difficile, r\u00e9essaie \ud83c\udfb2','fail');
   }
   function dirTo(r,c,nr,nc){
     if(nr<r)return 0; if(nr>r)return 2; if(nc>c)return 1; return 3;
@@ -879,15 +859,16 @@
     const s=step1();
     carEls.forEach((el,i)=>{
       el.classList.remove('crashed');
+      el.style.display='flex';
       const car=CARS[i];
       el.style.transition='transform .2s ease';
       el.style.transform=`translate(${car.start.c*s}px,${car.start.r*s}px)`;
       const body=el.querySelector('.body');
       body.style.transition='transform .2s ease';
-      body.style.transform='';      // orientation neutre
+      body.style.transform='';
     });
-    document.querySelectorAll('.boom').forEach(b=>b.remove());
-    draw();                    // remet l'affichage des numéros dans l'ordre défini
+    clearBooms();
+    draw();
     flash('⏹ Arrêté. Ajuste l\u2019ordre des sorties puis relance ▶','win');
   };
 
@@ -897,7 +878,31 @@
   // 🚗 pointe vers la gauche (Ouest) par défaut.
   const carTransform={3:'rotate(0deg)',0:'rotate(90deg)',1:'scaleX(-1)',2:'scaleX(-1) rotate(90deg)'};
 
-  function clearBooms(){document.querySelectorAll('.boom').forEach(b=>b.remove());}
+  function clearBooms(){
+    document.querySelectorAll('.boom, .debris').forEach(b=>b.remove());
+    document.querySelectorAll('.cell.deadend-flash').forEach(c=>c.classList.remove('deadend-flash'));
+  }
+
+  // Petite alarme via Web Audio API : 2-3 bips selon la sévérité
+  let audioCtx=null;
+  function playAlarm(big){
+    try{
+      audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+      const ctx=audioCtx;
+      const beeps = big ? [{f:200,t:0},{f:150,t:0.18},{f:100,t:0.36},{f:80,t:0.55}]
+                        : [{f:660,t:0},{f:440,t:0.15},{f:660,t:0.3}];
+      beeps.forEach(b=>{
+        const o=ctx.createOscillator(), g=ctx.createGain();
+        o.type='square'; o.frequency.value=b.f;
+        g.gain.value=0; o.connect(g); g.connect(ctx.destination);
+        const t0=ctx.currentTime+b.t;
+        g.gain.setValueAtTime(0,t0);
+        g.gain.linearRampToValueAtTime(0.15,t0+0.01);
+        g.gain.linearRampToValueAtTime(0,t0+0.12);
+        o.start(t0); o.stop(t0+0.14);
+      });
+    }catch(e){}
+  }
 
   function runRace(){
     running=true;paused=false;resumeFn=null;
@@ -938,25 +943,27 @@
     let steps=0; const MAX=ROWS*COLS*8;
 
     function tick(){
-      if(++steps>MAX){endRace();return flash('Une voiture tourne en rond… 🌀','fail');}
+      // Plus de plafond global : si une voiture tourne en rond, elle tourne ;
+      // la course se termine quand toutes les voitures sont arrivées ou éliminées.
+      steps++;
 
       // 1) calcule le prochain mouvement de chaque voiture encore active
       const moves={};
       for(const st of state){
         if(st.done||!st.alive){moves[st.car.id]=null;continue;}
         moves[st.car.id]=computeNext(st);
-        if(moves[st.car.id]===false){endRace();return;} // erreur de tracé déjà signalée
+        // si false, la voiture vient d'être éliminée (st.alive=false) ; on continue
       }
 
-      // 2) détection de collision entre les deux voitures
+      // 2) détection de collision (uniquement entre voitures encore actives ET en mouvement)
       const active=state.filter(st=>st.alive&&!st.done&&moves[st.car.id]);
       if(active.length===2){
         const [a,b]=active;
         const ma=moves[a.car.id], mb=moves[b.car.id];
-        const sameCell = ma.nr===mb.nr && ma.nc===mb.nc;                 // même case visée
-        const swap = ma.nr===b.r && ma.nc===b.c && mb.nr===a.r && mb.nc===a.c; // se croisent
+        const sameCell = ma.nr===mb.nr && ma.nc===mb.nc;
+        const swap = ma.nr===b.r && ma.nc===b.c && mb.nr===a.r && mb.nc===a.c;
         if(sameCell||swap){
-          // animer le déplacement puis le choc
+          // grosse collision -> fin du jeu pour les deux
           applyMove(a,ma);applyMove(b,mb);
           const cr=sameCell?ma.nr:Math.round((a.r+b.r)/2);
           const cc=sameCell?ma.nc:Math.round((a.c+b.c)/2);
@@ -965,53 +972,81 @@
         }
       }
 
-      // 3) pas de collision : on applique les mouvements
+      // 3) on applique les mouvements des voitures encore actives
       let anyMoved=false;
       for(const st of state){
         const m=moves[st.car.id];
-        if(m){applyMove(st,m);anyMoved=true;}
+        if(m && st.alive){applyMove(st,m);anyMoved=true;}
       }
 
-      // 4) conditions de fin
-      const allDone=state.every(st=>st.done||!st.alive);
-      if(allDone){
+      // 4) conditions de fin : toutes les voitures sont soit arrivées soit éliminées
+      const allFinished=state.every(st=>st.done||!st.alive);
+      if(allFinished){
         endRace();
-        const win=state.filter(st=>st.done).length;
-        if(win===state.length) return flash('🏁 Bravo ! Les deux voitures sont arrivées !','win');
-        if(win===1) return flash('🏁 Une voiture est arrivée, l\u2019autre est bloquée.','win');
-        return; // messages d'erreur déjà affichés
+        const arrived=state.filter(st=>st.done).length;
+        const lost=state.filter(st=>!st.alive && !st.done).length;
+        if(arrived===state.length) return flash('🏁 Bravo ! Les deux voitures sont arrivées !','win');
+        if(arrived>0 && lost>0)    return flash(`🏁 ${arrived} voiture arrivée, ${lost} éliminée.`,'win');
+        if(lost===state.length)    return flash('Aucune voiture n\u2019a atteint son arrivée.','fail');
+        return;
       }
       if(!anyMoved){endRace();return;}
       wait(1, tick);
     }
 
     // calcule le prochain pas d'une voiture (sans l'appliquer)
+    // Élimine UNE voiture sans arrêter la course de l'autre.
+    // kind: 'explode' = explosion + débris ; 'deadend' = fond rouge + alarme
+    function eliminate(st, kind, msg){
+      st.alive=false;
+      const sCell=cells[st.r] && cells[st.r][st.c];
+      if(kind==='explode'){
+        // animation d'explosion sur la voiture, puis débris persistants sur la case
+        st.el.classList.add('crashed');
+        const boom=document.createElement('div');boom.className='boom';boom.textContent='💥';
+        boom.style.left=(st.c*s)+'px';boom.style.top=(st.r*s)+'px';
+        board.appendChild(boom);
+        if(navigator.vibrate)navigator.vibrate([30,20,50]);
+        // après l'explosion, on cache la voiture et on pose un débris
+        setTimeout(()=>{
+          st.el.style.display='none';
+          const debris=document.createElement('div');
+          debris.className='debris';debris.textContent='🔥';
+          debris.style.left=(st.c*s)+'px';debris.style.top=(st.r*s)+'px';
+          board.appendChild(debris);
+        },700);
+      }else if(kind==='deadend'){
+        // fond rouge clignotant + alarme + voiture s'arrête là
+        if(sCell){sCell.classList.add('deadend-flash');}
+        if(navigator.vibrate)navigator.vibrate([100,50,100,50,100]);
+        playAlarm();
+      }
+      flash(`${kind==='explode'?'💥':'🚨'} ${st.car.name} : ${msg}`,'fail');
+    }
+
     function computeNext(st){
       const cell=grid[st.r][st.c];
-      if(!cell){st.alive=false;running=false;flash('Route cassée 🚧','fail');return false;}
+      if(!cell){eliminate(st,'explode','route cassée 🚧');return false;}
       if(st.r===st.car.end.r && st.c===st.car.end.c){st.done=true;return null;}
 
-      // TUILE BOUCLE : la voiture fait demi-tour et repart par où elle est venue.
+      // TUILE BOUCLE
       if(LOOP[cell.type]){
-        const exit=openDirs(cell)[0];   // seule ouverture de la boucle
-        // la voiture doit être entrée par cette ouverture ; sinon la boucle est mal raccordée
+        const exit=openDirs(cell)[0];
         if(st.cameFrom!==exit && st.cameFrom!==-1){
-          st.alive=false;running=false;
-          flash(`Voiture ${st.car.name} : la boucle n'est pas raccordée 🔌`,'fail');
-          return false;
+          eliminate(st,'explode','boucle non raccordée 🔌');return false;
         }
         const nr=st.r+DR[exit], nc=st.c+DC[exit];
-        if(nr<0||nr>=ROWS||nc<0||nc>=COLS){st.alive=false;running=false;
-          flash('La boucle pointe hors plateau ! 🚧','fail');return false;}
+        if(nr<0||nr>=ROWS||nc<0||nc>=COLS){
+          eliminate(st,'explode','la boucle pointe hors plateau 🚧');return false;
+        }
         const next=grid[nr][nc];
-        if(!next||!openDirs(next).includes(OPP[exit])){st.alive=false;running=false;
-          flash(`Voiture ${st.car.name} : la boucle débouche dans le vide 🔌`,'fail');return false;}
-        st.looped=true;                  // marque pour l'animation de pirouette
+        if(!next||!openDirs(next).includes(OPP[exit])){
+          eliminate(st,'explode','la boucle débouche dans le vide 🔌');return false;
+        }
         return {d:exit, nr, nc, loop:true};
       }
 
       const back=st.cameFrom;
-      // teste si une sortie d mène vers une route effectivement connectée
       const reachable=d=>{
         const nr=st.r+DR[d], nc=st.c+DC[d];
         if(nr<0||nr>=ROWS||nc<0||nc>=COLS) return false;
@@ -1024,14 +1059,10 @@
         const relIn=(back - cell.rot + 4) % 4;
         let relOutSpec=ROUTE[cell.type][relIn];
         if(relOutSpec===undefined){
-          st.alive=false;running=false;
-          flash(`Voiture ${st.car.name} : entrée par un côté fermé 🔌`,'fail');
-          return false;
+          eliminate(st,'explode','entrée par un côté fermé 🔌');return false;
         }
         let relOut;
         if(Array.isArray(relOutSpec)){
-          // alternance : on prend la sortie au rang du compteur, puis on avance.
-          // Si la tuile a swap=true, l'ordre est inversé.
           const spec = cell.swap ? [relOutSpec[1], relOutSpec[0]] : relOutSpec;
           const k=st.r+','+st.c+'/'+relIn;
           const p=(xPointer[k]||0) % spec.length;
@@ -1045,27 +1076,28 @@
         }
         const d=(relOut + cell.rot) % 4;
         if(!reachable(d)){
-          st.alive=false;running=false;
           const nr=st.r+DR[d],nc=st.c+DC[d];
-          flash((nr<0||nr>=ROWS||nc<0||nc>=COLS)
-            ? `Voiture ${st.car.name} : la route sort du plateau ! 🚧`
-            : `Voiture ${st.car.name} : routes non connectées 🔌`,'fail');
+          const off=(nr<0||nr>=ROWS||nc<0||nc>=COLS);
+          eliminate(st,'explode', off?'route hors plateau 🚧':'routes non connectées 🔌');
           return false;
         }
         return {d, nr:st.r+DR[d], nc:st.c+DC[d]};
       }
 
-      // Cas général (droite, virage, premier pas) : une seule sortie possible hors demi-tour.
+      // Cas général
       const usable=openDirs(cell).filter(d=>d!==back && reachable(d));
       if(!usable.length){
-        st.alive=false;running=false;
         const offboard=openDirs(cell).filter(d=>d!==back).some(d=>{
           const nr=st.r+DR[d],nc=st.c+DC[d];
           return nr<0||nr>=ROWS||nc<0||nc>=COLS;
         });
-        flash(offboard
-          ? `Voiture ${st.car.name} : la route sort du plateau ! 🚧`
-          : `Voiture ${st.car.name} : impasse, routes non connectées 🔌`,'fail');
+        // Cul-de-sac : la tuile n'a pas d'issue valable (pas une erreur "technique")
+        // -> fond rouge + alarme (sauf si c'est une sortie hors plateau pure)
+        if(offboard){
+          eliminate(st,'explode','route hors plateau 🚧');
+        }else{
+          eliminate(st,'deadend','cul-de-sac');
+        }
         return false;
       }
       const d=usable[0];
@@ -1089,13 +1121,23 @@
     function crash(cr,cc,a,b){
       endRace();
       a.el.classList.add('crashed');b.el.classList.add('crashed');
-      const boom=document.createElement('div');boom.className='boom';boom.textContent='💥';
-      boom.style.transform=`translate(${cc*s}px,${cr*s}px)`;
-      // translate est écrasé par l'animation scale ; on positionne via left/top à la place
-      boom.style.left=(cc*s)+'px';boom.style.top=(cr*s)+'px';boom.style.transform='';
+      // grosse explosion centrale
+      const boom=document.createElement('div');boom.className='boom big';boom.textContent='💥';
+      boom.style.left=(cc*s)+'px';boom.style.top=(cr*s)+'px';
       board.appendChild(boom);
-      if(navigator.vibrate)navigator.vibrate([40,30,60]);
-      flash('💥 Collision ! Les voitures se sont percutées.','fail');
+      // débris persistants après l'explosion sur les deux véhicules
+      setTimeout(()=>{
+        [a,b].forEach(car=>{
+          car.el.style.display='none';
+          const debris=document.createElement('div');
+          debris.className='debris';debris.textContent='🔥';
+          debris.style.left=(car.c*s)+'px';debris.style.top=(car.r*s)+'px';
+          board.appendChild(debris);
+        });
+      },700);
+      if(navigator.vibrate)navigator.vibrate([60,40,80,40,100]);
+      playAlarm(true);
+      flash('💥 COLLISION ! Fin du jeu.','fail');
     }
 
     wait(0.85, tick);

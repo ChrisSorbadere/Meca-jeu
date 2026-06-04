@@ -406,16 +406,30 @@
       el.style.outlineColor=mk.car.color;
       el.innerHTML=`<span class="badge" style="color:${mk.car.color}">${mk.kind}${mk.car.id+1}</span>`;
     }
-    // Sur Android et desktop, l'appui long / clic droit émet un événement `contextmenu`.
-    // On s'en sert directement, pas besoin de timer manuel parallèle (qui causait
-    // des doubles déclenchements annulant le swap).
-    let suppressClick=false;
+    // Appui long tactile détecté par timer (contexte tactile valide -> vibration autorisée).
+    // contextmenu sert uniquement à la souris (clic droit desktop).
+    let suppressClick=false, lpTimer=null, longDone=false;
+    el.addEventListener('touchstart',()=>{
+      if(running)return;
+      longDone=false;
+      lpTimer=setTimeout(()=>{
+        lpTimer=null; longDone=true; suppressClick=true;
+        if(navigator.vibrate)navigator.vibrate(30);   // vibration dans le geste tactile
+        altAction(r,c);
+      },450);
+    },{passive:true});
+    const cancelLP=()=>{ if(lpTimer){clearTimeout(lpTimer);lpTimer=null;} };
+    el.addEventListener('touchend',cancelLP);
+    el.addEventListener('touchmove',cancelLP);
+    el.addEventListener('touchcancel',cancelLP);
     el.oncontextmenu=e=>{
       e.preventDefault();
-      if(!running){
-        suppressClick=true;
+      // souris uniquement : si l'appui long tactile a déjà agi, on ne refait rien.
+      // Si contextmenu arrive avant le timer, on annule le timer pour éviter le double-swap.
+      if(lpTimer){clearTimeout(lpTimer);lpTimer=null;}
+      if(!running && !longDone){
+        longDone=true; suppressClick=true;
         altAction(r,c);
-        if(navigator.vibrate)navigator.vibrate(20);
       }
     };
     el.onclick=(e)=>{

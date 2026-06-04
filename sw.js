@@ -1,5 +1,5 @@
 // Service worker : met en cache les fichiers pour le hors-ligne et l'installation PWA.
-const CACHE='meca-v17';
+const CACHE='meca-v18';
 const FILES=['./','./index.html','./manifest.json','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',e=>{

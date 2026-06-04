@@ -205,6 +205,7 @@
       <button class="speed-btn" data-mult="0.5">🐇 Rapide</button>
     </div>
     <div id="msg"></div>
+    <button id="vibtest" style="width:100%;background:#9b5de5;font-size:14px;padding:12px;margin-top:4px">📳 TEST VIBRATION</button>
     <p class="hint">🚗 <b>verte</b> A1→B1 &nbsp;•&nbsp; 🚙 <b>bleue</b> A2→B2 &nbsp;— réseau partagé. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : ordre des sorties. <b>Générer</b> crée 2 parcours. Évite les collisions 💥&nbsp;!</p>
   </div>
 
@@ -626,6 +627,19 @@
   };
 
   loadAutosave();
+
+  // --- Bouton de diagnostic vibration ---
+  document.getElementById('vibtest').onclick=()=>{
+    const msg=document.getElementById('msg');
+    if(!('vibrate' in navigator)){
+      msg.textContent='❌ navigator.vibrate ABSENT de ce navigateur';msg.className='fail';return;
+    }
+    const ok=navigator.vibrate(400);
+    msg.textContent = ok
+      ? '✅ vibrate() accepté — ça devrait vibrer maintenant'
+      : '⚠️ vibrate() refusé par le système (retour false)';
+    msg.className = ok ? 'win' : 'fail';
+  };
 
   const eraseBtn=document.getElementById('erase');
 

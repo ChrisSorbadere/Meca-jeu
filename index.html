@@ -1006,7 +1006,7 @@
         const boom=document.createElement('div');boom.className='boom';boom.textContent='💥';
         boom.style.left=(st.c*s)+'px';boom.style.top=(st.r*s)+'px';
         board.appendChild(boom);
-        if(navigator.vibrate)navigator.vibrate([30,20,50]);
+        if(navigator.vibrate)navigator.vibrate(600);   // vibration longue : sortie de route/explosion
         // après l'explosion, on cache la voiture et on pose un débris
         setTimeout(()=>{
           st.el.style.display='none';
@@ -1018,7 +1018,7 @@
       }else if(kind==='deadend'){
         // fond rouge clignotant + alarme + voiture s'arrête là
         if(sCell){sCell.classList.add('deadend-flash');}
-        if(navigator.vibrate)navigator.vibrate([100,50,100,50,100]);
+        if(navigator.vibrate)navigator.vibrate(600);   // vibration longue : cul-de-sac
         playAlarm();
       }
       flash(`${kind==='explode'?'💥':'🚨'} ${st.car.name} : ${msg}`,'fail');
@@ -1070,6 +1070,7 @@
           const newPtr=(p+1) % spec.length;
           xPointer[k]=newPtr;
           const cr=st.r, cc=st.c;
+          if(navigator.vibrate)navigator.vibrate(15);   // vibration courte : changement de sortie T
           wait(0.5, ()=>redrawTeeWithPointer(cr,cc,relIn,newPtr));
         }else{
           relOut=relOutSpec;
@@ -1135,7 +1136,7 @@
           board.appendChild(debris);
         });
       },700);
-      if(navigator.vibrate)navigator.vibrate([60,40,80,40,100]);
+      if(navigator.vibrate)navigator.vibrate(900);   // vibration très longue : collision finale
       playAlarm(true);
       flash('💥 COLLISION ! Fin du jeu.','fail');
     }

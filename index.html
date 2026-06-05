@@ -191,8 +191,8 @@
   <div class="controls">
     <div class="palette" id="palette"></div>
     <div class="obst-row">
-      <span class="obst-label">Obstacles : <b id="obst-val">15</b></span>
-      <input type="range" id="obst-slider" min="10" max="25" value="15">
+      <span class="obst-label">Obstacles : <b id="obst-val">16</b></span>
+      <input type="range" id="obst-slider" min="16" max="36" value="16" step="2">
     </div>
     <div class="tools">
       <button id="generate">🎲 Générer</button>
@@ -647,7 +647,7 @@
   const eraseBtn=document.getElementById('erase');
 
   // ---- Curseur nombre d'obstacles ----
-  let nObstacles=15;
+  let nObstacles=16;
   const obstSlider=document.getElementById('obst-slider');
   const obstVal=document.getElementById('obst-val');
   obstSlider.addEventListener('input',()=>{

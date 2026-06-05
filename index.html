@@ -764,8 +764,11 @@
     for(let attempt=0;attempt<60;attempt++){
       const {pairs,obst}=randomSetup(cfg.obst);
       const obstSet=new Set(obst.map(o=>obKey(o.r,o.c)));
-      // applique les positions tirées aux voitures
       CARS.forEach((car,i)=>{car.start=pairs[i].start;car.end=pairs[i].end;});
+
+      // toutes les cases départ/arrivée (de toutes les voitures)
+      const endpoints=new Set();
+      CARS.forEach(car=>{endpoints.add(obKey(car.start.r,car.start.c));endpoints.add(obKey(car.end.r,car.end.c));});
 
       const dbc={};
       const link=(r,c,d)=>{const k=obKey(r,c);if(!dbc[k])dbc[k]=new Set();dbc[k].add(d);};
@@ -775,10 +778,23 @@
 
       let ok=true;
       for(const car of CARS){
-        let pp=null;for(let i=0;i<40&&!pp;i++)pp=pathAvoid(car.start,car.end,obstSet,cfg.sin);
+        // interdits pour CE chemin : obstacles + toutes les A/B SAUF son propre départ/arrivée
+        const blocked=new Set(obstSet);
+        endpoints.forEach(k=>blocked.add(k));
+        blocked.delete(obKey(car.start.r,car.start.c));
+        blocked.delete(obKey(car.end.r,car.end.c));
+        let pp=null;for(let i=0;i<40&&!pp;i++)pp=pathAvoid(car.start,car.end,blocked,cfg.sin);
         if(!pp){ok=false;break;}addPath(pp);
       }
       if(!ok)continue;
+
+      // garde-fou : chaque A/B ne doit avoir qu'UNE seule connexion (vraie fin de route)
+      let endpointsOK=true;
+      for(const car of CARS){
+        const ks=obKey(car.start.r,car.start.c), ke=obKey(car.end.r,car.end.c);
+        if((dbc[ks]&&dbc[ks].size>1)||(dbc[ke]&&dbc[ke].size>1)){endpointsOK=false;break;}
+      }
+      if(!endpointsOK)continue;
 
       const g=gridFromDirs(dbc);
       if(!CARS.every(car=>simulateCar(g,car,obstSet)))continue;

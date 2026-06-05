@@ -214,7 +214,7 @@
       <button class="speed-btn" data-mult="0.5">🐇 Rapide</button>
     </div>
     <div id="msg"></div>
-    <p class="hint">🚗 <b>verte</b> A1→B1 &nbsp;•&nbsp; 🚙 <b>bleue</b> A2→B2 &nbsp;— réseau partagé. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : ordre des sorties. <b>Générer</b> crée 2 parcours. Évite les collisions 💥&nbsp;!</p>
+    <p class="hint">🚗 <b>rouge</b> A1→B1 &nbsp;•&nbsp; 🚙 <b>bleue</b> A2→B2 &nbsp;•&nbsp; 🚕 <b>jaune</b> A3→B3. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : ordre des sorties (T). <b>Générer</b> crée 3 parcours. Évite les collisions 💥&nbsp;!</p>
   </div>
 
   <!-- Modale Circuits -->
@@ -293,7 +293,7 @@
 
   // Trois voitures ; positions départ/arrivée tirées au sort à chaque génération.
   const CARS=[
-    {id:0, name:'Verte', color:'#43aa8b', emoji:'🚗', start:{r:ROWS-1,c:0}, end:{r:0,c:COLS-1}},
+    {id:0, name:'Rouge', color:'#e8403a', emoji:'🚗', start:{r:ROWS-1,c:0}, end:{r:0,c:COLS-1}},
     {id:1, name:'Bleue', color:'#4d8cee', emoji:'🚙', start:{r:0,c:0}, end:{r:ROWS-1,c:COLS-1}},
     {id:2, name:'Jaune', color:'#f4c430', emoji:'🚕', start:{r:0,c:Math.floor(COLS/2)}, end:{r:ROWS-1,c:Math.floor(COLS/2)}}
   ];
@@ -375,7 +375,7 @@
     }
     // numéros sur les sorties d'alternance (T), agrandis pour lisibilité
     if(order && order.ordered){
-      const pos={0:{x:5,y:1.7},1:{x:8.3,y:5.4},2:{x:5,y:8.9},3:{x:1.7,y:5.4}};
+      const pos={0:{x:5,y:2.6},1:{x:8.3,y:5.4},2:{x:5,y:8.9},3:{x:1.7,y:5.4}};
       order.ordered.forEach((relD,i)=>{
         const absD=(relD + r) % 4;
         const p=pos[absD];

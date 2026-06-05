@@ -127,7 +127,7 @@
   .ptile svg{width:100%;flex:1;min-height:0}
   .pt-label{font-size:7px;text-align:center;color:var(--muted);padding:1px 0;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-  .tools{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+  .tools{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
   .tools button{font-size:11px;padding:9px 2px}
   /* Modale Circuits */
   .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;
@@ -154,10 +154,10 @@
   .load-btn{background:var(--roadline);color:#1a1a1a}
   .del-btn{background:var(--accent)}
   .saves-empty{text-align:center;color:var(--muted);font-size:12px;padding:20px 0}
-  .diff{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-  .diff-label{font-size:11px;color:var(--muted);font-weight:bold}
-  .diff-btn{flex:1;padding:8px 4px;font-size:12px;background:var(--grid)}
-  .diff-btn.active{background:var(--roadline);color:#1a1a1a}
+  .obst-row{display:flex;align-items:center;gap:10px;padding:2px 2px}
+  .obst-label{font-size:12px;color:var(--muted);font-weight:bold;white-space:nowrap}
+  .obst-label b{color:var(--roadline);font-size:14px}
+  #obst-slider{flex:1;accent-color:var(--roadline);height:24px}
   button{
     font-family:inherit;font-weight:bold;font-size:12px;cursor:pointer;
     border:none;border-radius:10px;padding:11px 4px;color:#fff;
@@ -190,14 +190,13 @@
 
   <div class="controls">
     <div class="palette" id="palette"></div>
-    <div class="diff" id="diff">
-      <span class="diff-label">Difficulté :</span>
-      <button class="diff-btn active" data-lvl="easy">Facile</button>
-      <button class="diff-btn" data-lvl="medium">Moyen</button>
-      <button class="diff-btn" data-lvl="hard">Difficile</button>
+    <div class="obst-row">
+      <span class="obst-label">Obstacles : <b id="obst-val">5</b></span>
+      <input type="range" id="obst-slider" min="1" max="15" value="5">
     </div>
     <div class="tools">
       <button id="generate">🎲 Générer</button>
+      <button id="gen-obst">⛰️ Obstacles</button>
       <button id="erase">🧽 Gomme</button>
       <button id="clear">🗑️ Effacer</button>
       <button id="save">💾 Circuits</button>
@@ -291,7 +290,6 @@
   let resumeFn=null;
   let raceToken=0;
   const lastRot={};
-  let longFired=false;
   const grid=Array.from({length:ROWS},()=>Array(COLS).fill(null));
   // Obstacles : cases infranchissables (montagne/lac/forêt). obstacles[r][c] = emoji ou null
   const obstacles=Array.from({length:ROWS},()=>Array(COLS).fill(null));
@@ -306,28 +304,6 @@
   const rot=(d,t)=>(d+t)%4;
   const openDirs=cell=>cell?TYPES[cell.type].open.map(d=>rot(d,cell.rot)):[];
 
-  // Permutations d'un tableau (pour cycler l'ordre des sorties)
-  function permutations(arr){
-    if(arr.length<=1)return [arr.slice()];
-    const res=[];
-    arr.forEach((v,i)=>{
-      const rest=arr.slice(0,i).concat(arr.slice(i+1));
-      permutations(rest).forEach(p=>res.push([v,...p]));
-    });
-    return res;
-  }
-  // ordre par défaut = côtés ouverts (absolus) triés ; order = index dans la liste des permutations
-  function orderedExits(cell){
-    const open=openDirs(cell);
-    if(open.length<=2) return open;            // pas d'ambiguïté
-    const perms=permutations(open.slice().sort((a,b)=>a-b));
-    return perms[(cell.order||0)%perms.length];
-  }
-  function nbOrders(cell){
-    const open=openDirs(cell);
-    if(open.length<=2) return 1;
-    let f=1;for(let i=2;i<=open.length;i++)f*=i;return f; // factorielle
-  }
 
   function tileSVG(type,r,order){
     const road='var(--road)', line='var(--roadline)', c=5;
@@ -374,20 +350,17 @@
       s+=`<path d="M5 10 Q5 5 0 5" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
       s+=`</g>`;
     }else if(type==='ycurve'){
-      // Y : 3 branches courbes (base N, E, O) se rejoignant au centre
+      // Y : branche Nord droite + branches Est/Ouest courbes, rejointes au centre
       const angle=r*90;
       s+=`<g transform="rotate(${angle} 5 5)">`;
-      // branche Nord -> centre (droite verticale haute)
+      // route (tracé épais)
       s+=`<path d="M5 0 L5 5" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="butt"/>`;
-      // courbe Est -> centre
-      s+=`<path d="M10 5 Q5 5 5 5" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="butt"/>`;
-      s+=`<path d="M10 5 Q6 5 5 4" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="round"/>`;
-      // courbe Ouest -> centre
-      s+=`<path d="M0 5 Q4 5 5 4" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="round"/>`;
+      s+=`<path d="M10 5 Q6.5 5.5 5 5" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="round"/>`;
+      s+=`<path d="M0 5 Q3.5 5.5 5 5" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="round"/>`;
       // pointillés guides
       s+=`<path d="M5 0 L5 5" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
-      s+=`<path d="M10 5 Q6 5 5 4" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
-      s+=`<path d="M0 5 Q4 5 5 4" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
+      s+=`<path d="M10 5 Q6.5 5.5 5 5" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
+      s+=`<path d="M0 5 Q3.5 5.5 5 5" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
       s+=`</g>`;
     }else{
       open.forEach(d=>s+=seg(d));
@@ -673,15 +646,13 @@
 
   const eraseBtn=document.getElementById('erase');
 
-  // ---- Sélecteur de difficulté ----
-  let difficulty='easy';
-  document.querySelectorAll('.diff-btn').forEach(b=>{
-    b.onclick=()=>{
-      if(running)return;
-      difficulty=b.dataset.lvl;
-      document.querySelectorAll('.diff-btn').forEach(x=>x.classList.remove('active'));
-      b.classList.add('active');
-    };
+  // ---- Curseur nombre d'obstacles ----
+  let nObstacles=5;
+  const obstSlider=document.getElementById('obst-slider');
+  const obstVal=document.getElementById('obst-val');
+  obstSlider.addEventListener('input',()=>{
+    nObstacles=parseInt(obstSlider.value,10);
+    obstVal.textContent=nObstacles;
   });
 
   // Dérive {type,rot} dont les ouvertures == dirs. Priorité aux tuiles NON directionnelles
@@ -710,7 +681,12 @@
   // ---- Génération : helpers ----
   const obKey=(r,c)=>r+','+c;
   function distM(a,b){return Math.abs(a.r-b.r)+Math.abs(a.c-b.c);}
-  const OBSTACLE_EMOJIS=['\u26f0\ufe0f','\ud83c\udf04','\ud83c\udf32','\ud83c\udf0a','\ud83c\udfde\ufe0f'];
+  // Familles d'obstacles : un massif est entièrement d'une même famille.
+  const OBSTACLE_FAMILIES=[
+    ['\u26f0\ufe0f','\ud83c\udfd4\ufe0f'],  // montagnes
+    ['\ud83c\udf32','\ud83c\udf33'],         // forêt
+    ['\ud83c\udf0a']                          // lac / eau
+  ];
 
   // Simule le trajet d'une voiture (sans animation) en évitant les obstacles.
   function simulateCar(g, car, obstSet){
@@ -763,12 +739,41 @@
     if(cur.r!==e.r||cur.c!==e.c)return null;
     return path;
   }
-  // tire au sort positions A/B (éloignées) des 3 voitures + obstacles
+  // Place des obstacles en massifs de 1 à 4 cases collées, chaque massif d'une seule famille.
+  // total = nombre de cases d'obstacle visé. Renvoie la liste {r,c,emoji} et marque `used`.
+  function placeObstacles(total, used){
+    const obst=[];
+    let placed=0, guard=0;
+    while(placed<total && guard++<400){
+      const fam=OBSTACLE_FAMILIES[Math.floor(Math.random()*OBSTACLE_FAMILIES.length)];
+      const size=Math.min(1+Math.floor(Math.random()*4), total-placed); // 1 à 4
+      // case de départ libre
+      let r0,c0,t=0;
+      do{r0=Math.floor(Math.random()*ROWS);c0=Math.floor(Math.random()*COLS);t++;}
+      while(used.has(obKey(r0,c0))&&t<100);
+      if(used.has(obKey(r0,c0)))continue;
+      // croissance du massif par cases adjacentes
+      const massif=[{r:r0,c:c0}];used.add(obKey(r0,c0));
+      while(massif.length<size){
+        const base=massif[Math.floor(Math.random()*massif.length)];
+        const dirs=[[-1,0],[1,0],[0,1],[0,-1]].sort(()=>Math.random()-0.5);
+        let grew=false;
+        for(const[dr,dc]of dirs){const nr=base.r+dr,nc=base.c+dc;
+          if(nr<0||nr>=ROWS||nc<0||nc>=COLS)continue;
+          if(used.has(obKey(nr,nc)))continue;
+          massif.push({r:nr,c:nc});used.add(obKey(nr,nc));grew=true;break;}
+        if(!grew)break;
+      }
+      massif.forEach(m=>{obst.push({r:m.r,c:m.c,emoji:fam[Math.floor(Math.random()*fam.length)]});});
+      placed+=massif.length;
+    }
+    return obst;
+  }
+  // tire au sort positions A/B (éloignées) des 3 voitures + obstacles en massifs
   function randomSetup(nObst){
     const used=new Set();
+    const obst=placeObstacles(nObst, used);
     function freeCell(){let r,c,t=0;do{r=Math.floor(Math.random()*ROWS);c=Math.floor(Math.random()*COLS);t++;}while(used.has(obKey(r,c))&&t<300);used.add(obKey(r,c));return {r,c};}
-    const obst=[];
-    for(let i=0;i<nObst;i++){const o=freeCell();o.emoji=OBSTACLE_EMOJIS[Math.floor(Math.random()*OBSTACLE_EMOJIS.length)];obst.push(o);}
     const pairs=[];
     for(let i=0;i<CARS.length;i++){
       let s,e,tries=0;
@@ -778,16 +783,15 @@
     return {pairs,obst};
   }
 
-  function generate(retry){
-    if(running)return;
-    const cfg={easy:{sin:1.2,obst:3},medium:{sin:3,obst:6},hard:{sin:6,obst:10}}[difficulty];
+  const SINUOSITY=3;   // sinuosité fixe (serpentement moyen des routes)
 
+  function generate(){
+    if(running)return;
     for(let attempt=0;attempt<60;attempt++){
-      const {pairs,obst}=randomSetup(cfg.obst);
+      const {pairs,obst}=randomSetup(nObstacles);
       const obstSet=new Set(obst.map(o=>obKey(o.r,o.c)));
       CARS.forEach((car,i)=>{car.start=pairs[i].start;car.end=pairs[i].end;});
 
-      // toutes les cases départ/arrivée (de toutes les voitures)
       const endpoints=new Set();
       CARS.forEach(car=>{endpoints.add(obKey(car.start.r,car.start.c));endpoints.add(obKey(car.end.r,car.end.c));});
 
@@ -799,17 +803,15 @@
 
       let ok=true;
       for(const car of CARS){
-        // interdits pour CE chemin : obstacles + toutes les A/B SAUF son propre départ/arrivée
         const blocked=new Set(obstSet);
         endpoints.forEach(k=>blocked.add(k));
         blocked.delete(obKey(car.start.r,car.start.c));
         blocked.delete(obKey(car.end.r,car.end.c));
-        let pp=null;for(let i=0;i<40&&!pp;i++)pp=pathAvoid(car.start,car.end,blocked,cfg.sin);
+        let pp=null;for(let i=0;i<40&&!pp;i++)pp=pathAvoid(car.start,car.end,blocked,SINUOSITY);
         if(!pp){ok=false;break;}addPath(pp);
       }
       if(!ok)continue;
 
-      // garde-fou : chaque A/B ne doit avoir qu'UNE seule connexion (vraie fin de route)
       let endpointsOK=true;
       for(const car of CARS){
         const ks=obKey(car.start.r,car.start.c), ke=obKey(car.end.r,car.end.c);
@@ -820,7 +822,6 @@
       const g=gridFromDirs(dbc);
       if(!CARS.every(car=>simulateCar(g,car,obstSet)))continue;
 
-      // succès : applique obstacles + grille
       for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){obstacles[r][c]=null;grid[r][c]=g[r][c];}
       obst.forEach(o=>{obstacles[o.r][o.c]=o.emoji;});
       flash('Circuit g\u00e9n\u00e9r\u00e9 \u2014 jouable ! \u25b6','win');
@@ -829,11 +830,41 @@
     }
     flash('G\u00e9n\u00e9ration difficile, r\u00e9essaie \ud83c\udfb2','fail');
   }
+
+  // Place uniquement les obstacles + les départs/arrivées (sans tracer le circuit).
+  // Garantit qu'une solution existe (chemins possibles entre chaque A/B en évitant les obstacles).
+  function generateObstacles(){
+    if(running)return;
+    for(let attempt=0;attempt<60;attempt++){
+      const {pairs,obst}=randomSetup(nObstacles);
+      const obstSet=new Set(obst.map(o=>obKey(o.r,o.c)));
+      const tmp=CARS.map((car,i)=>({start:pairs[i].start,end:pairs[i].end}));
+      // vérifie qu'un chemin existe pour chaque voiture (sinon le défi serait insoluble)
+      const endpoints=new Set();
+      tmp.forEach(c=>{endpoints.add(obKey(c.start.r,c.start.c));endpoints.add(obKey(c.end.r,c.end.c));});
+      let solvable=true;
+      for(const car of tmp){
+        const blocked=new Set(obstSet);endpoints.forEach(k=>blocked.add(k));
+        blocked.delete(obKey(car.start.r,car.start.c));blocked.delete(obKey(car.end.r,car.end.c));
+        if(!pathAvoid(car.start,car.end,blocked,SINUOSITY)){solvable=false;break;}
+      }
+      if(!solvable)continue;
+      // applique : positions + obstacles, grille vide (au joueur de tracer)
+      CARS.forEach((car,i)=>{car.start=pairs[i].start;car.end=pairs[i].end;});
+      for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){obstacles[r][c]=null;grid[r][c]=null;}
+      obst.forEach(o=>{obstacles[o.r][o.c]=o.emoji;});
+      flash('\u26f0\ufe0f Obstacles plac\u00e9s \u2014 \u00e0 toi de tracer les routes !','win');
+      draw();autosave();
+      return;
+    }
+    flash('Placement difficile, r\u00e9essaie',  'fail');
+  }
   function dirTo(r,c,nr,nc){
     if(nr<r)return 0; if(nr>r)return 2; if(nc>c)return 1; return 3;
   }
 
   document.getElementById('generate').onclick=generate;
+  document.getElementById('gen-obst').onclick=generateObstacles;
   eraseBtn.onclick=()=>{eraseMode=!eraseMode;eraseBtn.style.outline=eraseMode?'2px solid var(--accent)':'';};
   document.getElementById('clear').onclick=()=>{if(running)return;
     for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){grid[r][c]=null;obstacles[r][c]=null;}
@@ -1006,7 +1037,7 @@
         return flash(`Pose une route sur le départ A${st.car.id+1} !`,'fail');}
     }
 
-    let steps=0; const MAX=ROWS*COLS*8;
+    let steps=0;
 
     function tick(){
       // Plus de plafond global : si une voiture tourne en rond, elle tourne ;

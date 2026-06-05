@@ -118,7 +118,7 @@
 
   /* controls */
   .controls{width:100%;max-width:420px;display:flex;flex-direction:column;gap:8px}
-  .palette{display:grid;grid-template-columns:repeat(6,1fr);gap:3px}
+  .palette{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
   .ptile{
     height:56px;background:var(--panel);border-radius:8px;cursor:pointer;
     border:2px solid transparent;padding:2px 2px 0;display:flex;flex-direction:column;
@@ -253,7 +253,8 @@
     tee:     {name:'T-D', open:[1,2,3]},  // courbe vers l'Est
     tee_l:   {name:'T-G', open:[1,2,3]},  // miroir : courbe vers l'Ouest
     cross:   {name:'Croisem.', open:[0,1,2,3]},
-    dcurve:  {name:'Double', open:[0,1,2,3]}  // )( : deux courbes N-E et S-O, sans se croiser
+    dcurve:  {name:'Double', open:[0,1,2,3]},  // )( : deux courbes N-E et S-O, sans se croiser
+    ycurve:  {name:'Y', open:[0,1,3]}          // 3 branches courbes N,E,O ; N alterne E/O
   };
   // Plus de tuiles à choix multiple : T et X sont désormais déterministes.
   const MULTI={};
@@ -269,16 +270,20 @@
     tee_l:{3:[1,2], 1:3, 2:3},
     // Double courbe )( (base : courbe N-E + courbe S-O, sans intersection)
     // - N <-> E (courbe haut-droite)  ; - S <-> O (courbe bas-gauche)
-    dcurve:{0:1, 1:0, 2:3, 3:2}
+    dcurve:{0:1, 1:0, 2:3, 3:2},
+    ycurve:{0:[1,3], 1:0, 3:0}
   };
 
   // Retourne l'ordre courant des sorties d'alternance pour un T (selon swap).
+  // côté d'entrée qui porte l'alternance, selon le type
+  const ALT_IN={tee:1, tee_l:3, ycurve:0};
   function teeAlternance(cell){
-    const relIn = cell.type==='tee' ? 1 : 3;
+    const relIn = ALT_IN[cell.type];
     const base  = ROUTE[cell.type][relIn];
     const ord   = cell.swap ? [base[1], base[0]] : base;
     return {relIn, ordered:ord};
   }
+  const hasAlternance=t=>t in ALT_IN;
 
   let selectedType='straight', eraseMode=false, running=false;
   let speedMult=1;
@@ -368,12 +373,28 @@
       s+=`<path d="M5 10 Q5 5 0 5" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="butt"/>`;
       s+=`<path d="M5 10 Q5 5 0 5" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
       s+=`</g>`;
+    }else if(type==='ycurve'){
+      // Y : 3 branches courbes (base N, E, O) se rejoignant au centre
+      const angle=r*90;
+      s+=`<g transform="rotate(${angle} 5 5)">`;
+      // branche Nord -> centre (droite verticale haute)
+      s+=`<path d="M5 0 L5 5" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="butt"/>`;
+      // courbe Est -> centre
+      s+=`<path d="M10 5 Q5 5 5 5" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="butt"/>`;
+      s+=`<path d="M10 5 Q6 5 5 4" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="round"/>`;
+      // courbe Ouest -> centre
+      s+=`<path d="M0 5 Q4 5 5 4" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="round"/>`;
+      // pointillés guides
+      s+=`<path d="M5 0 L5 5" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
+      s+=`<path d="M10 5 Q6 5 5 4" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
+      s+=`<path d="M0 5 Q4 5 5 4" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
+      s+=`</g>`;
     }else{
       open.forEach(d=>s+=seg(d));
       s+=`<rect x="3" y="3" width="4" height="4" fill="${road}"/>`;
       open.forEach(d=>s+=dash(d));
     }
-    // numéros sur les sorties d'alternance (T), agrandis pour lisibilité
+    // numéros sur les sorties d'alternance, agrandis pour lisibilité
     if(order && order.ordered){
       const pos={0:{x:5,y:2.6},1:{x:8.3,y:5.4},2:{x:5,y:8.9},3:{x:1.7,y:5.4}};
       order.ordered.forEach((relD,i)=>{
@@ -467,7 +488,7 @@
   // clic droit / appui long : sur T et X, change l'ordre des sorties ; sinon pivote
   function altAction(r,c){
     const cur=grid[r][c];if(!cur)return;
-    if(cur.type==='tee'||cur.type==='tee_l'){
+    if(hasAlternance(cur.type)){
       // appui long sur un T : inverse l'ordre de l'alternance (1 ↔ 2)
       cur.swap=!cur.swap;
     }else{
@@ -497,13 +518,13 @@
       }
       if(cell){
         let ord=null;
-        if(cell.type==='tee'||cell.type==='tee_l') ord=teeAlternance(cell);
+        if(hasAlternance(cell.type)) ord=teeAlternance(cell);
         el.insertAdjacentHTML('afterbegin',tileSVG(cell.type,cell.rot,ord));
       }
     }
   }
   function redrawTeeWithPointer(r,c,relIn,ptr){
-    const cell=grid[r][c];if(!cell||(cell.type!=='tee'&&cell.type!=='tee_l'))return;
+    const cell=grid[r][c];if(!cell||!hasAlternance(cell.type))return;
     const raw=ROUTE[cell.type][relIn];
     if(!Array.isArray(raw))return;
     const spec = cell.swap ? [raw[1], raw[0]] : raw;
@@ -890,7 +911,7 @@
 
   const step1=()=>TS+1;
   // 🚗 pointe vers la gauche (Ouest) par défaut.
-  const carTransform={3:'rotate(0deg)',1:'scaleX(-1)',0:'rotate(-90deg)',2:'rotate(90deg)'};
+  const carTransform={3:'rotate(0deg)',1:'scaleX(-1)',0:'scaleX(-1) rotate(-90deg)',2:'rotate(-90deg)'};
 
   function clearBooms(){
     document.querySelectorAll('.boom, .debris').forEach(b=>b.remove());
@@ -920,7 +941,6 @@
 
   // Confettis de réussite
   function confetti(){
-    playAlarm(false);
     const colors=['#43aa8b','#4d8cee','#f4c430','#ee6c4d','#9b5de5','#ffd95e'];
     const wrap=document.createElement('div');wrap.className='fx-layer';
     for(let i=0;i<60;i++){
@@ -936,7 +956,6 @@
   }
   // Éclairs de défaite
   function lightning(){
-    playAlarm(true);
     const wrap=document.createElement('div');wrap.className='fx-layer';
     for(let i=0;i<5;i++){
       const b=document.createElement('div');b.className='bolt';b.textContent='⚡';

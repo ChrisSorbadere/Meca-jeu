@@ -101,6 +101,15 @@
   .boom.big{font-size:calc(var(--ts) * 1.4);animation:boom 1s ease-out forwards}
   /* fond rouge clignotant : cul-de-sac */
   .cell.deadend-flash{animation:deadend 0.6s ease-in-out infinite}
+  .cell.obstacle{background:#2a3320;display:flex;align-items:center;justify-content:center;cursor:not-allowed}
+  .obstacle-emoji{font-size:calc(var(--ts) * .62);pointer-events:none}
+  .fx-layer{position:fixed;inset:0;z-index:200;pointer-events:none;overflow:hidden}
+  .confetti{position:absolute;top:-12px;width:9px;height:14px;border-radius:2px;animation:fall linear forwards}
+  @keyframes fall{0%{transform:translateY(0) rotate(0);opacity:1}100%{transform:translateY(105vh) rotate(720deg);opacity:.9}}
+  .bolt{position:absolute;animation:boltflash .5s ease-out forwards}
+  @keyframes boltflash{0%{opacity:0;transform:scale(.4)}30%{opacity:1;transform:scale(1.3)}100%{opacity:0;transform:scale(1)}}
+  .screen-flash{position:absolute;inset:0;background:#ffffff;opacity:0;animation:sflash .4s ease-out 2}
+  @keyframes sflash{0%,100%{opacity:0}50%{opacity:.35}}
   @keyframes deadend{
     0%,100%{background:var(--gridline)}
     50%{background:#c83a3a}
@@ -205,7 +214,6 @@
       <button class="speed-btn" data-mult="0.5">🐇 Rapide</button>
     </div>
     <div id="msg"></div>
-    <button id="vibtest" style="width:100%;background:#9b5de5;font-size:14px;padding:12px;margin-top:4px">📳 TEST VIBRATION</button>
     <p class="hint">🚗 <b>verte</b> A1→B1 &nbsp;•&nbsp; 🚙 <b>bleue</b> A2→B2 &nbsp;— réseau partagé. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : ordre des sorties. <b>Générer</b> crée 2 parcours. Évite les collisions 💥&nbsp;!</p>
   </div>
 
@@ -245,54 +253,49 @@
     tee:     {name:'T-D', open:[1,2,3]},  // courbe vers l'Est
     tee_l:   {name:'T-G', open:[1,2,3]},  // miroir : courbe vers l'Ouest
     cross:   {name:'Croisem.', open:[0,1,2,3]},
-    loop:    {name:'Boucle', open:[2]}
+    dcurve:  {name:'Double', open:[0,1,2,3]}  // )( : deux courbes N-E et S-O, sans se croiser
   };
   // Plus de tuiles à choix multiple : T et X sont désormais déterministes.
   const MULTI={};
-  // Tuiles « demi-tour » : entrée = sortie
-  const LOOP={loop:1};
+  const LOOP={};
 
   // Table de routage. Pour le T, l'entrée par E donne une ALTERNANCE entre deux sorties.
-  // Format : valeur unique = sortie déterministe ; tableau = liste de sorties à alterner.
   const ROUTE={
     // X : on continue toujours tout droit
     cross:{0:2, 1:3, 2:0, 3:1},
     // T droite (base : barre E-O + courbe S->E)
-    // - E : alterne entre O (tout droit) et S (courbe)
-    // - O : déterministe -> E
-    // - S : déterministe -> E (courbe)
     tee:{1:[3,2], 3:1, 2:1},
     // T gauche (miroir : barre E-O + courbe S->O)
-    // - O : alterne entre E (tout droit) et S (courbe)
-    // - E : déterministe -> O
-    // - S : déterministe -> O (courbe)
-    tee_l:{3:[1,2], 1:3, 2:3}
+    tee_l:{3:[1,2], 1:3, 2:3},
+    // Double courbe )( (base : courbe N-E + courbe S-O, sans intersection)
+    // - N <-> E (courbe haut-droite)  ; - S <-> O (courbe bas-gauche)
+    dcurve:{0:1, 1:0, 2:3, 3:2}
   };
 
   // Retourne l'ordre courant des sorties d'alternance pour un T (selon swap).
-  // Renvoie aussi le relIn (côté d'entrée concerné par l'alternance) pour ce type.
   function teeAlternance(cell){
-    const relIn = cell.type==='tee' ? 1 : 3;          // E pour tee, O pour tee_l
-    const base  = ROUTE[cell.type][relIn];            // [3,2] ou [1,2]
+    const relIn = cell.type==='tee' ? 1 : 3;
+    const base  = ROUTE[cell.type][relIn];
     const ord   = cell.swap ? [base[1], base[0]] : base;
     return {relIn, ordered:ord};
   }
 
   let selectedType='straight', eraseMode=false, running=false;
-  let speedMult=1;        // multiplicateur de délai (2=lent, 1=normal, 0.5=rapide)
-  let paused=false;       // état pause pendant la course
-  let resumeFn=null;      // fonction à rappeler pour reprendre après pause
-  let raceToken=0;        // jeton incrémenté à chaque course ; permet d'annuler proprement
-  const lastRot={};  // dernière orientation posée par type de tuile
-  let longFired=false;  // évite que l'appui long déclenche aussi le clic
-  // cell = {type, rot, order} ; order = permutation des côtés ouverts (priorité de sortie)
+  let speedMult=1;
+  let paused=false;
+  let resumeFn=null;
+  let raceToken=0;
+  const lastRot={};
+  let longFired=false;
   const grid=Array.from({length:ROWS},()=>Array(COLS).fill(null));
-  // Deux voitures : chacune son départ/arrivée, sur un réseau de routes partagé.
+  // Obstacles : cases infranchissables (montagne/lac/forêt). obstacles[r][c] = emoji ou null
+  const obstacles=Array.from({length:ROWS},()=>Array(COLS).fill(null));
+
+  // Trois voitures ; positions départ/arrivée tirées au sort à chaque génération.
   const CARS=[
-    {id:0, name:'Verte', color:'#43aa8b', emoji:'🚗',
-     start:{r:ROWS-1,c:0}, end:{r:0,c:COLS-1}},
-    {id:1, name:'Bleue', color:'#4d8cee', emoji:'🚙',
-     start:{r:0,c:0}, end:{r:ROWS-1,c:COLS-1}}
+    {id:0, name:'Verte', color:'#43aa8b', emoji:'🚗', start:{r:ROWS-1,c:0}, end:{r:0,c:COLS-1}},
+    {id:1, name:'Bleue', color:'#4d8cee', emoji:'🚙', start:{r:0,c:0}, end:{r:ROWS-1,c:COLS-1}},
+    {id:2, name:'Jaune', color:'#f4c430', emoji:'🚕', start:{r:0,c:Math.floor(COLS/2)}, end:{r:ROWS-1,c:Math.floor(COLS/2)}}
   ];
 
   const rot=(d,t)=>(d+t)%4;
@@ -337,42 +340,47 @@
       3:`<line x1="0" y1="5" x2="5" y2="5" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`
     }[d]);
     let s='';
-    // Cas spécial T (droite et gauche) : rendu organique avec barre droite + courbe
     if(type==='tee' || type==='tee_l'){
       const angle=r*90;
-      // Pour tee_l (miroir), on applique un scaleX(-1) autour du centre
       const mirror = (type==='tee_l') ? ' scale(-1 1) translate(-10 0)' : '';
       s+=`<g transform="rotate(${angle} 5 5)${mirror}">`;
-      // barre E-O complète
       s+=`<rect x="0" y="3" width="10" height="4" fill="${road}"/>`;
-      // branche courbe S -> E
       s+=`<path d="M3 10 Q3 5 7 5" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="butt"/>`;
-      // pointillés guide
       s+=`<line x1="0" y1="5" x2="10" y2="5" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
       s+=`<path d="M5 10 Q5 5 9 5" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
+      s+=`</g>`;
+    }else if(type==='turn'){
+      // virage arrondi : courbe douce entre deux côtés adjacents (base E-S)
+      const angle=r*90;
+      s+=`<g transform="rotate(${angle} 5 5)">`;
+      // ruban de route courbé : du bord Est (10,5) vers le bord Sud (5,10)
+      s+=`<path d="M10 5 Q5 5 5 10" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="butt"/>`;
+      s+=`<path d="M10 5 Q5 5 5 10" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
+      s+=`</g>`;
+    }else if(type==='dcurve'){
+      // double courbe )( : courbe N-E (haut-droite) + courbe S-O (bas-gauche), sans se croiser
+      const angle=r*90;
+      s+=`<g transform="rotate(${angle} 5 5)">`;
+      // courbe N <-> E
+      s+=`<path d="M5 0 Q5 5 10 5" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="butt"/>`;
+      s+=`<path d="M5 0 Q5 5 10 5" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
+      // courbe S <-> O
+      s+=`<path d="M5 10 Q5 5 0 5" fill="none" stroke="${road}" stroke-width="4" stroke-linecap="butt"/>`;
+      s+=`<path d="M5 10 Q5 5 0 5" fill="none" stroke="${line}" stroke-width=".4" stroke-dasharray="1 1"/>`;
       s+=`</g>`;
     }else{
       open.forEach(d=>s+=seg(d));
       s+=`<rect x="3" y="3" width="4" height="4" fill="${road}"/>`;
       open.forEach(d=>s+=dash(d));
     }
-    // tuile boucle : un anneau au centre qui renvoie la voiture
-    if(LOOP[type]){
-      // anneau de route (couronne) centré, par-dessus le segment d'entrée
-      s+=`<circle cx="5" cy="5" r="2.6" fill="none" stroke="${road}" stroke-width="1.6"/>`;
-      s+=`<circle cx="5" cy="5" r="2.6" fill="none" stroke="${line}" stroke-width=".35" stroke-dasharray="1 1"/>`;
-      // petite flèche de demi-tour
-      s+=`<path d="M5.9 3.1 a2.1 2.1 0 1 1 -1.8 0" fill="none" stroke="#ffd95e" stroke-width=".45"/>`;
-    }
-    // numéros sur les sorties d'alternance (T) — order = {relIn, ordered: [relDir1, relDir2]}
+    // numéros sur les sorties d'alternance (T), agrandis pour lisibilité
     if(order && order.ordered){
-      // positions absolues (après application de la rotation r)
-      const pos={0:{x:5,y:1.6},1:{x:8.4,y:5.3},2:{x:5,y:8.8},3:{x:1.6,y:5.3}};
+      const pos={0:{x:5,y:1.7},1:{x:8.3,y:5.4},2:{x:5,y:8.9},3:{x:1.7,y:5.4}};
       order.ordered.forEach((relD,i)=>{
         const absD=(relD + r) % 4;
         const p=pos[absD];
-        s+=`<circle cx="${p.x}" cy="${p.y-0.9}" r="1.5" fill="#1a1a1a"/>`;
-        s+=`<text x="${p.x}" y="${p.y}" font-size="2" fill="#f4d35e" text-anchor="middle" font-family="sans-serif" font-weight="bold">${i+1}</text>`;
+        s+=`<circle cx="${p.x}" cy="${p.y-1.0}" r="2.1" fill="#1a1a1a"/>`;
+        s+=`<text x="${p.x}" y="${p.y}" font-size="3" fill="#f4d35e" text-anchor="middle" font-family="sans-serif" font-weight="bold">${i+1}</text>`;
       });
     }
     return `<svg viewBox="0 0 10 10">${s}</svg>`;
@@ -401,14 +409,7 @@
   const cells=[];
   for(let r=0;r<ROWS;r++){cells[r]=[];for(let c=0;c<COLS;c++){
     const el=document.createElement('div');el.className='cell';
-    const mk=markerAt(r,c);
-    if(mk){
-      el.classList.add(mk.kind==='A'?'start':'end');
-      el.style.outlineColor=mk.car.color;
-      el.innerHTML=`<span class="badge" style="color:${mk.car.color}">${mk.kind}${mk.car.id+1}</span>`;
-    }
     // Appui long tactile détecté par timer (contexte tactile valide -> vibration autorisée).
-    // contextmenu sert uniquement à la souris (clic droit desktop).
     let suppressClick=false, lpTimer=null, longDone=false;
     el.addEventListener('touchstart',()=>{
       if(running)return;
@@ -449,6 +450,7 @@
   });
 
   function cellClick(r,c){
+    if(obstacles[r][c])return;            // case obstacle : interdite
     if(eraseMode){grid[r][c]=null;draw();autosave();return;}
     const cur=grid[r][c];
     if(cur && cur.type===selectedType){
@@ -476,28 +478,37 @@
 
   function draw(){
     for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
-      const el=cells[r][c],cell=grid[r][c],badge=el.querySelector('.badge');
-      el.innerHTML='';if(badge)el.appendChild(badge);
+      const el=cells[r][c],cell=grid[r][c];
+      el.innerHTML='';
+      el.className='cell';
+      el.style.outlineColor='';
+      // obstacle ?
+      if(obstacles[r][c]){
+        el.classList.add('obstacle');
+        el.innerHTML=`<span class="obstacle-emoji">${obstacles[r][c]}</span>`;
+        continue;
+      }
+      // marqueur départ/arrivée ?
+      const mk=markerAt(r,c);
+      if(mk){
+        el.classList.add(mk.kind==='A'?'start':'end');
+        el.style.outlineColor=mk.car.color;
+        el.insertAdjacentHTML('beforeend',`<span class="badge" style="color:${mk.car.color}">${mk.kind}${mk.car.id+1}</span>`);
+      }
       if(cell){
-        // pour le T (droite/gauche), on affiche par défaut les numéros sur les 2 sorties d'alternance
         let ord=null;
-        if(cell.type==='tee'||cell.type==='tee_l'){
-          ord=teeAlternance(cell);
-        }
+        if(cell.type==='tee'||cell.type==='tee_l') ord=teeAlternance(cell);
         el.insertAdjacentHTML('afterbegin',tileSVG(cell.type,cell.rot,ord));
       }
     }
   }
-  // Redessine la tuile T avec les numéros sur les sorties de l'entrée `relIn` (alternance).
-  // ptr = prochain index actif dans la liste des sorties alternantes.
   function redrawTeeWithPointer(r,c,relIn,ptr){
     const cell=grid[r][c];if(!cell||(cell.type!=='tee'&&cell.type!=='tee_l'))return;
     const raw=ROUTE[cell.type][relIn];
     if(!Array.isArray(raw))return;
-    // applique swap : ordre de base inversé si la tuile a été basculée
     const spec = cell.swap ? [raw[1], raw[0]] : raw;
     const n=spec.length;
-    const ordered=spec.map((_,i)=>spec[(ptr+i)%n]); // prochaine = 1, autre = 2
+    const ordered=spec.map((_,i)=>spec[(ptr+i)%n]);
     const el=cells[r][c],badge=el.querySelector('.badge');
     el.innerHTML='';if(badge)el.appendChild(badge);
     el.insertAdjacentHTML('afterbegin',tileSVG(cell.type,cell.rot,{relIn, ordered}));
@@ -505,32 +516,43 @@
   draw();
 
   // ============== SYSTÈME DE SAUVEGARDE ==============
-  // Format compact : chaque case = "type:rot:swap" séparés par "|".
-  const TYPE_CODE={straight:'s',turn:'t',tee:'T',tee_l:'L',cross:'x',loop:'o'};
+  // Format : objet JSON {g:grille, o:obstacles, c:positions voitures}
+  const TYPE_CODE={straight:'s',turn:'t',tee:'T',tee_l:'L',cross:'x',dcurve:'d'};
   const CODE_TYPE=Object.fromEntries(Object.entries(TYPE_CODE).map(([k,v])=>[v,k]));
   function serializeGrid(){
     const cells=[];
     for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
       const g=grid[r][c];
-      if(!g) cells.push('');
-      else cells.push(TYPE_CODE[g.type]+g.rot+(g.swap?'s':''));
+      cells.push(!g?'':(TYPE_CODE[g.type]+g.rot+(g.swap?'s':'')));
     }
-    return cells.join('|');
+    const obs=[];
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)obs.push(obstacles[r][c]||'');
+    const cars=CARS.map(c=>({s:[c.start.r,c.start.c],e:[c.end.r,c.end.c]}));
+    return JSON.stringify({g:cells.join('|'), o:obs.join('|'), c:cars});
   }
   function deserializeGrid(str){
-    if(!str || typeof str!=='string')return false;
-    const parts=str.split('|');
+    if(!str||typeof str!=='string')return false;
+    let data;
+    try{ data=JSON.parse(str); }
+    catch(e){ data={g:str}; }   // rétrocompat : ancien format = juste la grille
+    const parts=(data.g||'').split('|');
     if(parts.length!==ROWS*COLS)return false;
     const newGrid=Array.from({length:ROWS},()=>Array(COLS).fill(null));
     for(let i=0;i<parts.length;i++){
       const p=parts[i]; if(!p)continue;
       const type=CODE_TYPE[p[0]]; if(!type)continue;
-      const rot=parseInt(p[1],10); if(isNaN(rot))continue;
+      const rt=parseInt(p[1],10); if(isNaN(rt))continue;
       const swap=p.length>2 && p[2]==='s';
-      const r=Math.floor(i/COLS), c=i%COLS;
-      newGrid[r][c]={type,rot,order:0,swap};
+      newGrid[Math.floor(i/COLS)][i%COLS]={type,rot:rt,order:0,swap};
     }
     for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)grid[r][c]=newGrid[r][c];
+    // obstacles
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)obstacles[r][c]=null;
+    if(data.o){const op=data.o.split('|');
+      for(let i=0;i<op.length&&i<ROWS*COLS;i++)if(op[i])obstacles[Math.floor(i/COLS)][i%COLS]=op[i];}
+    // positions voitures
+    if(Array.isArray(data.c)){data.c.forEach((cc,i)=>{if(CARS[i]&&cc){
+      CARS[i].start={r:cc.s[0],c:cc.s[1]};CARS[i].end={r:cc.e[0],c:cc.e[1]};}});}
     return true;
   }
 
@@ -628,19 +650,6 @@
 
   loadAutosave();
 
-  // --- Bouton de diagnostic vibration ---
-  document.getElementById('vibtest').onclick=()=>{
-    const msg=document.getElementById('msg');
-    if(!('vibrate' in navigator)){
-      msg.textContent='❌ navigator.vibrate ABSENT de ce navigateur';msg.className='fail';return;
-    }
-    const ok=navigator.vibrate(400);
-    msg.textContent = ok
-      ? '✅ vibrate() accepté — ça devrait vibrer maintenant'
-      : '⚠️ vibrate() refusé par le système (retour false)';
-    msg.className = ok ? 'win' : 'fail';
-  };
-
   const eraseBtn=document.getElementById('erase');
 
   // ---- Sélecteur de difficulté ----
@@ -658,7 +667,7 @@
   // (straight, turn, cross) ; le T dirigé n'est utilisé qu'en dernier recours (3 ouvertures).
   function tileFromDirs(dirs){
     const set=[...new Set(dirs)].sort((a,b)=>a-b);
-    for(const type of ['straight','turn','cross','loop']){
+    for(const type of ['straight','turn','cross']){
       for(let rt=0;rt<4;rt++){
         const open=TYPES[type].open.map(d=>(d+rt)%4).sort((a,b)=>a-b);
         if(open.length===set.length && open.every((v,i)=>v===set[i]))
@@ -677,20 +686,21 @@
 
   // Simule le trajet d'une voiture sur une grille candidate (sans animation).
   // Retourne true si la voiture atteint son arrivée, false sinon (cul-de-sac/boucle/erreur).
-  function simulateCar(g, car){
+  // ---- Génération : helpers ----
+  const obKey=(r,c)=>r+','+c;
+  function distM(a,b){return Math.abs(a.r-b.r)+Math.abs(a.c-b.c);}
+  const OBSTACLE_EMOJIS=['\u26f0\ufe0f','\ud83c\udf04','\ud83c\udf32','\ud83c\udf0a','\ud83c\udfde\ufe0f'];
+
+  // Simule le trajet d'une voiture (sans animation) en évitant les obstacles.
+  function simulateCar(g, car, obstSet){
     let r=car.start.r,c=car.start.c,back=-1,steps=0;const xptr={};
     while(steps++<400){
       const cell=g[r][c];if(!cell)return false;
       if(r===car.end.r&&c===car.end.c)return true;
       const reach=d=>{const nr=r+DR[d],nc=c+DC[d];
         if(nr<0||nr>=ROWS||nc<0||nc>=COLS)return false;
+        if(obstSet&&obstSet.has(obKey(nr,nc)))return false;
         const nx=g[nr][nc];return !!nx&&openDirs(nx).includes(OPP[d]);};
-      if(LOOP[cell.type]){
-        const ex=openDirs(cell)[0];
-        if(back!==ex&&back!==-1)return false;
-        if(!reach(ex))return false;
-        r+=DR[ex];c+=DC[ex];back=OPP[ex];continue;
-      }
       let d;
       if(ROUTE[cell.type]&&back!==-1){
         const ri=(back-cell.rot+4)%4;const spec=ROUTE[cell.type][ri];
@@ -714,111 +724,71 @@
       const t=tileFromDirs(dirs);if(t)g[r][c]=t;}
     return g;
   }
-
-  // marche aléatoire de start à end sur la grille, renvoie une liste de cases
-  function randomPath(start,end,sinuosity){
-    const visited=new Set();
-    const key=(r,c)=>r+','+c;
-    let path=[{r:start.r,c:start.c}];
-    visited.add(key(start.r,start.c));
-    let cur={r:start.r,c:start.c}, guard=0;
-    while((cur.r!==end.r||cur.c!==end.c) && guard++<400){
-      // directions possibles
+  // chemin aléatoire évitant les obstacles
+  function pathAvoid(s,e,obstSet,sin){
+    const vis=new Set([obKey(s.r,s.c)]);let path=[{r:s.r,c:s.c}],cur={r:s.r,c:s.c},g=0;
+    while((cur.r!==e.r||cur.c!==e.c)&&g++<400){
       const opts=[];
-      [[-1,0,0],[1,0,2],[0,1,1],[0,-1,3]].forEach(([dr,dc])=>{
-        const nr=cur.r+dr, nc=cur.c+dc;
+      [[-1,0],[1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{const nr=cur.r+dr,nc=cur.c+dc;
         if(nr<0||nr>=ROWS||nc<0||nc>=COLS)return;
-        if(visited.has(key(nr,nc)))return;
-        opts.push({r:nr,c:nc});
-      });
-      if(!opts.length)break; // coincé -> on recommencera
-      // score : se rapprocher de l'arrivée, avec un peu d'aléa selon sinuosité
-      opts.forEach(o=>{
-        const dist=Math.abs(o.r-end.r)+Math.abs(o.c-end.c);
-        o.score=dist - Math.random()*sinuosity;
-      });
+        if(vis.has(obKey(nr,nc)))return;
+        if(obstSet.has(obKey(nr,nc)))return;
+        opts.push({r:nr,c:nc});});
+      if(!opts.length)break;
+      opts.forEach(o=>o.score=distM(o,e)-Math.random()*sin);
       opts.sort((a,b)=>a.score-b.score);
-      cur={r:opts[0].r,c:opts[0].c};
-      visited.add(key(cur.r,cur.c));
-      path.push(cur);
+      cur={r:opts[0].r,c:opts[0].c};vis.add(obKey(cur.r,cur.c));path.push(cur);
     }
-    if(cur.r!==end.r||cur.c!==end.c)return null;
+    if(cur.r!==e.r||cur.c!==e.c)return null;
     return path;
   }
-  function buildPath(start,end,sinuosity){
-    for(let i=0;i<60;i++){const p=randomPath(start,end,sinuosity);if(p)return p;}
-    return null;
+  // tire au sort positions A/B (éloignées) des 3 voitures + obstacles
+  function randomSetup(nObst){
+    const used=new Set();
+    function freeCell(){let r,c,t=0;do{r=Math.floor(Math.random()*ROWS);c=Math.floor(Math.random()*COLS);t++;}while(used.has(obKey(r,c))&&t<300);used.add(obKey(r,c));return {r,c};}
+    const obst=[];
+    for(let i=0;i<nObst;i++){const o=freeCell();o.emoji=OBSTACLE_EMOJIS[Math.floor(Math.random()*OBSTACLE_EMOJIS.length)];obst.push(o);}
+    const pairs=[];
+    for(let i=0;i<CARS.length;i++){
+      let s,e,tries=0;
+      do{s=freeCell();e=freeCell();tries++;}while(distM(s,e)<ROWS-2 && tries<60);
+      pairs.push({start:s,end:e});
+    }
+    return {pairs,obst};
   }
 
   function generate(retry){
     if(running)return;
-    retry=retry||0;
-    const cfg={
-      easy:  {sinuosity:1.2, branches:0},
-      medium:{sinuosity:3,   branches:6},
-      hard:  {sinuosity:6,   branches:16}
-    }[difficulty];
-    const key=(r,c)=>r+','+c;
+    const cfg={easy:{sin:1.2,obst:3},medium:{sin:3,obst:6},hard:{sin:6,obst:10}}[difficulty];
 
-    // Plusieurs tentatives : on ne garde qu'un circuit où les 2 voitures ARRIVENT.
-    for(let attempt=0; attempt<40; attempt++){
-      const p1=buildPath(CARS[0].start,CARS[0].end,cfg.sinuosity);
-      const p2=buildPath(CARS[1].start,CARS[1].end,cfg.sinuosity);
-      if(!p1||!p2) continue;
+    for(let attempt=0;attempt<60;attempt++){
+      const {pairs,obst}=randomSetup(cfg.obst);
+      const obstSet=new Set(obst.map(o=>obKey(o.r,o.c)));
+      // applique les positions tirées aux voitures
+      CARS.forEach((car,i)=>{car.start=pairs[i].start;car.end=pairs[i].end;});
 
       const dbc={};
-      const link=(r,c,d)=>{const k=key(r,c);if(!dbc[k])dbc[k]=new Set();dbc[k].add(d);};
-      const addPath=path=>{for(let i=0;i<path.length;i++){const {r,c}=path[i];
-        if(i>0)link(r,c,dirTo(r,c,path[i-1].r,path[i-1].c));
-        if(i<path.length-1)link(r,c,dirTo(r,c,path[i+1].r,path[i+1].c));}};
-      addPath(p1);addPath(p2);
+      const link=(r,c,d)=>{const k=obKey(r,c);if(!dbc[k])dbc[k]=new Set();dbc[k].add(d);};
+      const addPath=p=>{for(let i=0;i<p.length;i++){const{r,c}=p[i];
+        if(i>0)link(r,c,dirTo(r,c,p[i-1].r,p[i-1].c));
+        if(i<p.length-1)link(r,c,dirTo(r,c,p[i+1].r,p[i+1].c));}};
 
-      const prot=new Set();
-      CARS.forEach(c=>{prot.add(key(c.start.r,c.start.c));prot.add(key(c.end.r,c.end.c));});
-
-      // le circuit de base (2 chemins) doit déjà être jouable
-      let g=gridFromDirs(dbc);
-      if(!simulateCar(g,CARS[0])||!simulateCar(g,CARS[1])) continue;
-
-      // ajout incrémental d'intersections, validé par simulation à chaque étape
-      const MOVE={0:[-1,0],1:[0,1],2:[1,0],3:[0,-1]};
-      const isOcc=(r,c)=>!!dbc[key(r,c)];
-      const canOpen=(r,c)=>{if(prot.has(key(r,c)))return false;const e=dbc[key(r,c)];return !e||e.size<4;};
-      function findConn(sr,sc){
-        const sk=key(sr,sc);const q=[{r:sr,c:sc,path:[[sr,sc]]}];const seen=new Set([sk]);let st=0;
-        while(q.length&&st++<200){const cur=q.shift();const ord=[0,1,2,3].sort(()=>Math.random()-0.5);
-          for(const d of ord){const nr=cur.r+MOVE[d][0],nc=cur.c+MOVE[d][1];
-            if(nr<0||nr>=ROWS||nc<0||nc>=COLS)continue;const nk=key(nr,nc);if(seen.has(nk))continue;
-            if(isOcc(nr,nc)){if(nk!==sk&&cur.path.length>=2&&canOpen(nr,nc))return[...cur.path,[nr,nc]];continue;}
-            if(cur.path.length<=4){seen.add(nk);q.push({r:nr,c:nc,path:[...cur.path,[nr,nc]]});}}}
-        return null;
+      let ok=true;
+      for(const car of CARS){
+        let pp=null;for(let i=0;i<40&&!pp;i++)pp=pathAvoid(car.start,car.end,obstSet,cfg.sin);
+        if(!pp){ok=false;break;}addPath(pp);
       }
-      let added=0,att=0;
-      while(added<cfg.branches && att++<cfg.branches*20){
-        const occ=Object.keys(dbc).filter(k=>canOpen(...k.split(',').map(Number)));
-        if(!occ.length)break;
-        const [sr,sc]=occ[Math.floor(Math.random()*occ.length)].split(',').map(Number);
-        const conn=findConn(sr,sc);
-        if(!conn)continue;
-        const backup={};for(const k in dbc)backup[k]=new Set(dbc[k]);
-        for(let i=0;i<conn.length-1;i++){const[r,c]=conn[i],[nr,nc]=conn[i+1];
-          const d=dirTo(r,c,nr,nc);link(r,c,d);link(nr,nc,(d+2)%4);}
-        g=gridFromDirs(dbc);
-        if(simulateCar(g,CARS[0])&&simulateCar(g,CARS[1])){added++;}
-        else{for(const k in dbc)delete dbc[k];for(const k in backup)dbc[k]=backup[k];}
-      }
+      if(!ok)continue;
 
-      g=gridFromDirs(dbc);
-      if(simulateCar(g,CARS[0])&&simulateCar(g,CARS[1])){
-        for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)grid[r][c]=g[r][c];
-        let inter=0;
-        for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
-          const t=grid[r][c];if(t&&(t.type==='tee'||t.type==='tee_l'||t.type==='cross'))inter++;
-        }
-        flash(`Circuit g\u00e9n\u00e9r\u00e9 (${inter} intersection${inter>1?'s':''}) \u2014 jouable ! \u25b6`,'win');
-        draw();autosave();
-        return;
-      }
+      const g=gridFromDirs(dbc);
+      if(!CARS.every(car=>simulateCar(g,car,obstSet)))continue;
+
+      // succès : applique obstacles + grille
+      for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){obstacles[r][c]=null;grid[r][c]=g[r][c];}
+      obst.forEach(o=>{obstacles[o.r][o.c]=o.emoji;});
+      flash('Circuit g\u00e9n\u00e9r\u00e9 \u2014 jouable ! \u25b6','win');
+      draw();autosave();
+      return;
     }
     flash('G\u00e9n\u00e9ration difficile, r\u00e9essaie \ud83c\udfb2','fail');
   }
@@ -829,7 +799,7 @@
   document.getElementById('generate').onclick=generate;
   eraseBtn.onclick=()=>{eraseMode=!eraseMode;eraseBtn.style.outline=eraseMode?'2px solid var(--accent)':'';};
   document.getElementById('clear').onclick=()=>{if(running)return;
-    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)grid[r][c]=null;
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){grid[r][c]=null;obstacles[r][c]=null;}
     flash('',null);draw();autosave();};
 
   function flash(t,cls){const m=document.getElementById('msg');m.textContent=t;m.className=cls||'';}
@@ -904,7 +874,7 @@
 
   const step1=()=>TS+1;
   // 🚗 pointe vers la gauche (Ouest) par défaut.
-  const carTransform={3:'rotate(0deg)',0:'rotate(90deg)',1:'scaleX(-1)',2:'scaleX(-1) rotate(90deg)'};
+  const carTransform={3:'rotate(0deg)',1:'scaleX(-1)',0:'rotate(-90deg)',2:'rotate(90deg)'};
 
   function clearBooms(){
     document.querySelectorAll('.boom, .debris').forEach(b=>b.remove());
@@ -930,6 +900,39 @@
         o.start(t0); o.stop(t0+0.14);
       });
     }catch(e){}
+  }
+
+  // Confettis de réussite
+  function confetti(){
+    playAlarm(false);
+    const colors=['#43aa8b','#4d8cee','#f4c430','#ee6c4d','#9b5de5','#ffd95e'];
+    const wrap=document.createElement('div');wrap.className='fx-layer';
+    for(let i=0;i<60;i++){
+      const p=document.createElement('div');p.className='confetti';
+      p.style.left=Math.random()*100+'%';
+      p.style.background=colors[Math.floor(Math.random()*colors.length)];
+      p.style.animationDelay=(Math.random()*0.4)+'s';
+      p.style.animationDuration=(1.2+Math.random()*1.2)+'s';
+      wrap.appendChild(p);
+    }
+    document.body.appendChild(wrap);
+    setTimeout(()=>wrap.remove(),3000);
+  }
+  // Éclairs de défaite
+  function lightning(){
+    playAlarm(true);
+    const wrap=document.createElement('div');wrap.className='fx-layer';
+    for(let i=0;i<5;i++){
+      const b=document.createElement('div');b.className='bolt';b.textContent='⚡';
+      b.style.left=(10+Math.random()*80)+'%';
+      b.style.top=(Math.random()*60)+'%';
+      b.style.animationDelay=(Math.random()*0.5)+'s';
+      b.style.fontSize=(30+Math.random()*40)+'px';
+      wrap.appendChild(b);
+    }
+    const sf=document.createElement('div');sf.className='screen-flash';wrap.appendChild(sf);
+    document.body.appendChild(wrap);
+    setTimeout(()=>wrap.remove(),1600);
   }
 
   function runRace(){
@@ -983,16 +986,16 @@
         // si false, la voiture vient d'être éliminée (st.alive=false) ; on continue
       }
 
-      // 2) détection de collision (uniquement entre voitures encore actives ET en mouvement)
+      // 2) détection de collision entre TOUTE paire de voitures actives en mouvement
       const active=state.filter(st=>st.alive&&!st.done&&moves[st.car.id]);
-      if(active.length===2){
-        const [a,b]=active;
+      for(let i=0;i<active.length;i++)for(let j=i+1;j<active.length;j++){
+        const a=active[i], b=active[j];
         const ma=moves[a.car.id], mb=moves[b.car.id];
         const sameCell = ma.nr===mb.nr && ma.nc===mb.nc;
         const swap = ma.nr===b.r && ma.nc===b.c && mb.nr===a.r && mb.nc===a.c;
         if(sameCell||swap){
-          // grosse collision -> fin du jeu pour les deux
-          applyMove(a,ma);applyMove(b,mb);
+          // on applique tous les mouvements (les autres voitures avancent aussi visuellement)
+          for(const st of state){const m=moves[st.car.id];if(m&&st.alive)applyMove(st,m);}
           const cr=sameCell?ma.nr:Math.round((a.r+b.r)/2);
           const cc=sameCell?ma.nc:Math.round((a.c+b.c)/2);
           wait(1, ()=>crash(cr,cc,a,b));
@@ -1007,15 +1010,15 @@
         if(m && st.alive){applyMove(st,m);anyMoved=true;}
       }
 
-      // 4) conditions de fin : toutes les voitures sont soit arrivées soit éliminées
+      // 4) conditions de fin
       const allFinished=state.every(st=>st.done||!st.alive);
       if(allFinished){
         endRace();
         const arrived=state.filter(st=>st.done).length;
         const lost=state.filter(st=>!st.alive && !st.done).length;
-        if(arrived===state.length) return flash('🏁 Bravo ! Les deux voitures sont arrivées !','win');
-        if(arrived>0 && lost>0)    return flash(`🏁 ${arrived} voiture arrivée, ${lost} éliminée.`,'win');
-        if(lost===state.length)    return flash('Aucune voiture n\u2019a atteint son arrivée.','fail');
+        if(arrived===state.length){ confetti(); return flash('🏁 Bravo ! Toutes les voitures sont arrivées !','win'); }
+        if(arrived>0 && lost>0){ confetti(); return flash(`🏁 ${arrived} arrivée(s), ${lost} éliminée(s).`,'win'); }
+        if(lost===state.length){ lightning(); return flash('⚡ Aucune voiture n\u2019a atteint son arrivée.','fail'); }
         return;
       }
       if(!anyMoved){endRace();return;}

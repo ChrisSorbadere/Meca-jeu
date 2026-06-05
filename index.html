@@ -127,7 +127,7 @@
   .ptile svg{width:100%;flex:1;min-height:0}
   .pt-label{font-size:7px;text-align:center;color:var(--muted);padding:1px 0;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-  .tools{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+  .tools{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
   .tools button{font-size:11px;padding:9px 2px}
   /* Modale Circuits */
   .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;
@@ -191,11 +191,10 @@
   <div class="controls">
     <div class="palette" id="palette"></div>
     <div class="obst-row">
-      <span class="obst-label">Obstacles : <b id="obst-val">16</b></span>
-      <input type="range" id="obst-slider" min="16" max="36" value="16" step="2">
+      <span class="obst-label">Obstacles : <b id="obst-val">26</b></span>
+      <input type="range" id="obst-slider" min="26" max="50" value="26" step="2">
     </div>
     <div class="tools">
-      <button id="generate">🎲 Générer</button>
       <button id="gen-obst">⛰️ Obstacles</button>
       <button id="erase">🧽 Gomme</button>
       <button id="clear">🗑️ Effacer</button>
@@ -213,7 +212,7 @@
       <button class="speed-btn" data-mult="0.5">🐇 Rapide</button>
     </div>
     <div id="msg"></div>
-    <p class="hint">🚗 <b>rouge</b> A1→B1 &nbsp;•&nbsp; 🚙 <b>bleue</b> A2→B2 &nbsp;•&nbsp; 🚕 <b>jaune</b> A3→B3. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : ordre des sorties (T). <b>Générer</b> crée 3 parcours. Évite les collisions 💥&nbsp;!</p>
+    <p class="hint">🚂 <b>rouge</b> A1→B1 &nbsp;•&nbsp; 🚂 <b>bleu</b> A2→B2 &nbsp;•&nbsp; 🚂 <b>jaune</b> A3→B3. <b>Obstacles</b> place les gares, <b>à toi de tracer les rails</b>. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : sortie des T/Y. Chaque train = loco + 3 wagons. Évite les collisions 💥&nbsp;!</p>
   </div>
 
   <!-- Modale Circuits -->
@@ -294,12 +293,14 @@
   // Obstacles : cases infranchissables (montagne/lac/forêt). obstacles[r][c] = emoji ou null
   const obstacles=Array.from({length:ROWS},()=>Array(COLS).fill(null));
 
-  // Trois voitures ; positions départ/arrivée tirées au sort à chaque génération.
+  // Trois trains ; positions gare départ/arrivée tirées au sort.
+  const NWAGONS=3;
   const CARS=[
-    {id:0, name:'Rouge', color:'#e8403a', emoji:'🚗', start:{r:ROWS-1,c:0}, end:{r:0,c:COLS-1}},
-    {id:1, name:'Bleue', color:'#4d8cee', emoji:'🚙', start:{r:0,c:0}, end:{r:ROWS-1,c:COLS-1}},
-    {id:2, name:'Jaune', color:'#f4c430', emoji:'🚕', start:{r:0,c:Math.floor(COLS/2)}, end:{r:ROWS-1,c:Math.floor(COLS/2)}}
+    {id:0, name:'Rouge', color:'#e8403a', emoji:'🚂', start:{r:ROWS-1,c:0}, end:{r:0,c:COLS-1}},
+    {id:1, name:'Bleu',  color:'#4d8cee', emoji:'🚂', start:{r:0,c:0}, end:{r:ROWS-1,c:COLS-1}},
+    {id:2, name:'Jaune', color:'#f4c430', emoji:'🚂', start:{r:0,c:Math.floor(COLS/2)}, end:{r:ROWS-1,c:Math.floor(COLS/2)}}
   ];
+  const WAGON_EMOJI='🚃';
 
   const rot=(d,t)=>(d+t)%4;
   const openDirs=cell=>cell?TYPES[cell.type].open.map(d=>rot(d,cell.rot)):[];
@@ -434,14 +435,25 @@
     };
     board.appendChild(el);cells[r][c]=el;
   }}
-  // un élément voiture par CAR
-  const carEls=CARS.map(car=>{
-    const d=document.createElement('div');
-    d.className='car-sprite';d.style.display='none';
-    d.innerHTML=`<span class="body">${car.emoji}</span>`;
-    board.appendChild(d);
-    return d;
+  // Chaque train : 1 locomotive + NWAGONS wagons. Chaque segment est un élément positionné.
+  // trainEls[i] = { loco, wagons:[...] }
+  const trainEls=CARS.map(car=>{
+    const loco=document.createElement('div');
+    loco.className='car-sprite';loco.style.display='none';
+    loco.innerHTML=`<span class="body">${car.emoji}</span>`;
+    board.appendChild(loco);
+    const wagons=[];
+    for(let w=0;w<NWAGONS;w++){
+      const wg=document.createElement('div');
+      wg.className='car-sprite wagon';wg.style.display='none';
+      wg.innerHTML=`<span class="body">${WAGON_EMOJI}</span>`;
+      board.appendChild(wg);
+      wagons.push(wg);
+    }
+    return {loco, wagons};
   });
+  // compat : carEls[i] = la locomotive (pour le code STOP existant)
+  const carEls=trainEls.map(t=>t.loco);
 
   function cellClick(r,c){
     if(obstacles[r][c])return;            // case obstacle : interdite
@@ -647,7 +659,7 @@
   const eraseBtn=document.getElementById('erase');
 
   // ---- Curseur nombre d'obstacles ----
-  let nObstacles=16;
+  let nObstacles=26;
   const obstSlider=document.getElementById('obst-slider');
   const obstVal=document.getElementById('obst-val');
   obstSlider.addEventListener('input',()=>{
@@ -655,30 +667,7 @@
     obstVal.textContent=nObstacles;
   });
 
-  // Dérive {type,rot} dont les ouvertures == dirs. Priorité aux tuiles NON directionnelles
-  // (straight, turn, cross) ; le T dirigé n'est utilisé qu'en dernier recours (3 ouvertures).
-  function tileFromDirs(dirs){
-    const set=[...new Set(dirs)].sort((a,b)=>a-b);
-    for(const type of ['straight','turn','cross']){
-      for(let rt=0;rt<4;rt++){
-        const open=TYPES[type].open.map(d=>(d+rt)%4).sort((a,b)=>a-b);
-        if(open.length===set.length && open.every((v,i)=>v===set[i]))
-          return {type,rot:rt,order:0};
-      }
-    }
-    for(const type of ['tee','tee_l']){
-      for(let rt=0;rt<4;rt++){
-        const open=TYPES[type].open.map(d=>(d+rt)%4).sort((a,b)=>a-b);
-        if(open.length===set.length && open.every((v,i)=>v===set[i]))
-          return {type,rot:rt,order:0};
-      }
-    }
-    return null;
-  }
-
-  // Simule le trajet d'une voiture sur une grille candidate (sans animation).
-  // Retourne true si la voiture atteint son arrivée, false sinon (cul-de-sac/boucle/erreur).
-  // ---- Génération : helpers ----
+  // ---- Génération d'obstacles : helpers ----
   const obKey=(r,c)=>r+','+c;
   function distM(a,b){return Math.abs(a.r-b.r)+Math.abs(a.c-b.c);}
   // Familles d'obstacles : un massif est entièrement d'une même famille.
@@ -688,39 +677,6 @@
     ['\ud83c\udf0a']                          // lac / eau
   ];
 
-  // Simule le trajet d'une voiture (sans animation) en évitant les obstacles.
-  function simulateCar(g, car, obstSet){
-    let r=car.start.r,c=car.start.c,back=-1,steps=0;const xptr={};
-    while(steps++<400){
-      const cell=g[r][c];if(!cell)return false;
-      if(r===car.end.r&&c===car.end.c)return true;
-      const reach=d=>{const nr=r+DR[d],nc=c+DC[d];
-        if(nr<0||nr>=ROWS||nc<0||nc>=COLS)return false;
-        if(obstSet&&obstSet.has(obKey(nr,nc)))return false;
-        const nx=g[nr][nc];return !!nx&&openDirs(nx).includes(OPP[d]);};
-      let d;
-      if(ROUTE[cell.type]&&back!==-1){
-        const ri=(back-cell.rot+4)%4;const spec=ROUTE[cell.type][ri];
-        if(spec===undefined)return false;
-        if(Array.isArray(spec)){const k=r+','+c+'/'+ri;const p=(xptr[k]||0)%spec.length;
-          d=(spec[p]+cell.rot)%4;xptr[k]=p+1;}
-        else d=(spec+cell.rot)%4;
-        if(!reach(d))return false;
-      }else{
-        const u=openDirs(cell).filter(x=>x!==back&&reach(x));
-        if(!u.length)return false;d=u[0];
-      }
-      r+=DR[d];c+=DC[d];back=OPP[d];
-    }
-    return false;
-  }
-  function gridFromDirs(dbc){
-    const g=Array.from({length:ROWS},()=>Array(COLS).fill(null));
-    for(const k in dbc){const[r,c]=k.split(',').map(Number);
-      let dirs=[...dbc[k]];if(dirs.length===1)dirs.push((dirs[0]+2)%4);
-      const t=tileFromDirs(dirs);if(t)g[r][c]=t;}
-    return g;
-  }
   // chemin aléatoire évitant les obstacles
   function pathAvoid(s,e,obstSet,sin){
     const vis=new Set([obKey(s.r,s.c)]);let path=[{r:s.r,c:s.c}],cur={r:s.r,c:s.c},g=0;
@@ -785,52 +741,6 @@
 
   const SINUOSITY=3;   // sinuosité fixe (serpentement moyen des routes)
 
-  function generate(){
-    if(running)return;
-    for(let attempt=0;attempt<60;attempt++){
-      const {pairs,obst}=randomSetup(nObstacles);
-      const obstSet=new Set(obst.map(o=>obKey(o.r,o.c)));
-      CARS.forEach((car,i)=>{car.start=pairs[i].start;car.end=pairs[i].end;});
-
-      const endpoints=new Set();
-      CARS.forEach(car=>{endpoints.add(obKey(car.start.r,car.start.c));endpoints.add(obKey(car.end.r,car.end.c));});
-
-      const dbc={};
-      const link=(r,c,d)=>{const k=obKey(r,c);if(!dbc[k])dbc[k]=new Set();dbc[k].add(d);};
-      const addPath=p=>{for(let i=0;i<p.length;i++){const{r,c}=p[i];
-        if(i>0)link(r,c,dirTo(r,c,p[i-1].r,p[i-1].c));
-        if(i<p.length-1)link(r,c,dirTo(r,c,p[i+1].r,p[i+1].c));}};
-
-      let ok=true;
-      for(const car of CARS){
-        const blocked=new Set(obstSet);
-        endpoints.forEach(k=>blocked.add(k));
-        blocked.delete(obKey(car.start.r,car.start.c));
-        blocked.delete(obKey(car.end.r,car.end.c));
-        let pp=null;for(let i=0;i<40&&!pp;i++)pp=pathAvoid(car.start,car.end,blocked,SINUOSITY);
-        if(!pp){ok=false;break;}addPath(pp);
-      }
-      if(!ok)continue;
-
-      let endpointsOK=true;
-      for(const car of CARS){
-        const ks=obKey(car.start.r,car.start.c), ke=obKey(car.end.r,car.end.c);
-        if((dbc[ks]&&dbc[ks].size>1)||(dbc[ke]&&dbc[ke].size>1)){endpointsOK=false;break;}
-      }
-      if(!endpointsOK)continue;
-
-      const g=gridFromDirs(dbc);
-      if(!CARS.every(car=>simulateCar(g,car,obstSet)))continue;
-
-      for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){obstacles[r][c]=null;grid[r][c]=g[r][c];}
-      obst.forEach(o=>{obstacles[o.r][o.c]=o.emoji;});
-      flash('Circuit g\u00e9n\u00e9r\u00e9 \u2014 jouable ! \u25b6','win');
-      draw();autosave();
-      return;
-    }
-    flash('G\u00e9n\u00e9ration difficile, r\u00e9essaie \ud83c\udfb2','fail');
-  }
-
   // Place uniquement les obstacles + les départs/arrivées (sans tracer le circuit).
   // Garantit qu'une solution existe (chemins possibles entre chaque A/B en évitant les obstacles).
   function generateObstacles(){
@@ -863,7 +773,6 @@
     if(nr<r)return 0; if(nr>r)return 2; if(nc>c)return 1; return 3;
   }
 
-  document.getElementById('generate').onclick=generate;
   document.getElementById('gen-obst').onclick=generateObstacles;
   eraseBtn.onclick=()=>{eraseMode=!eraseMode;eraseBtn.style.outline=eraseMode?'2px solid var(--accent)':'';};
   document.getElementById('clear').onclick=()=>{if(running)return;
@@ -897,10 +806,14 @@
       updateCarSpeed();
     };
   });
+  function allSegments(){
+    const segs=[];
+    trainEls.forEach(t=>{segs.push(t.loco);t.wagons.forEach(w=>segs.push(w));});
+    return segs;
+  }
   function updateCarSpeed(){
-    // synchronise la transition CSS des voitures avec la vitesse courante
     const t=(stepDelay()/1000).toFixed(2);
-    carEls.forEach(el=>{el.style.transition=`transform ${t}s linear`;});
+    allSegments().forEach(el=>{el.style.transition=`transform ${t}s linear`;});
   }
 
   // Bouton Pause / Reprendre
@@ -917,18 +830,14 @@
   const stopBtn=document.getElementById('stop');
   stopBtn.onclick=()=>{
     if(!running)return;
-    raceToken++;              // annule tous les wait() en attente
+    raceToken++;
     running=false;paused=false;resumeFn=null;
     pauseBtn.disabled=true;pauseBtn.textContent='⏸ Pause';
     stopBtn.disabled=true;
-    // remet les voitures à leurs positions de départ
-    const s=step1();
-    carEls.forEach((el,i)=>{
+    // cache tous les segments (loco + wagons), retire les états
+    allSegments().forEach(el=>{
       el.classList.remove('crashed');
-      el.style.display='flex';
-      const car=CARS[i];
-      el.style.transition='transform .2s ease';
-      el.style.transform=`translate(${car.start.c*s}px,${car.start.r*s}px)`;
+      el.style.display='none';
       const body=el.querySelector('.body');
       body.style.transition='transform .2s ease';
       body.style.transform='';
@@ -1003,119 +912,180 @@
 
   function runRace(){
     running=true;paused=false;resumeFn=null;
-    raceToken++;            // nouvelle course : invalide les wait en attente d'une précédente
+    raceToken++;
     pauseBtn.disabled=false;pauseBtn.textContent='⏸ Pause';
     stopBtn.disabled=false;
     updateCarSpeed();
-    flash('Les voitures roulent…',null);
+    flash('Les trains avancent…',null);
     clearBooms();
-    draw(); // repart d'un affichage propre (numéros dans l'ordre défini)
+    draw();
     const s=step1();
-    // termine proprement la course (réactive les contrôles)
     function endRace(){ running=false; paused=false; resumeFn=null;
       pauseBtn.disabled=true; pauseBtn.textContent='⏸ Pause';
       stopBtn.disabled=true; }
-    // pointeur de sortie partagé par case (croisements/T) : tourne à chaque passage,
-    // toutes voitures confondues. Démarre sur la 1ère sortie de l'ordre défini.
     const xPointer={};
 
-    // état de chaque voiture
+    // état de chaque train.
+    // trail = liste des cases occupées, index 0 = locomotive, puis wagons.
+    // emerged = nombre de segments déjà sortis de la gare (croît jusqu'à 1+NWAGONS).
+    // headDone = la locomotive a atteint l'arrivée (le train rentre alors en gare).
     const state=CARS.map((car,i)=>{
-      const el=carEls[i];
-      el.classList.remove('crashed');
-      const body=el.querySelector('.body');
-      body.style.transform=carTransform[1]; // orientation neutre de départ
-      el.style.display='flex';
-      el.style.transform=`translate(${car.start.c*s}px,${car.start.r*s}px)`;
-      return {car, el, body, r:car.start.r, c:car.start.c,
-              cameFrom:-1, done:false, alive:true};
+      const t=trainEls[i];
+      t.loco.classList.remove('crashed');
+      t.loco.querySelector('.body').style.transform=carTransform[1];
+      t.loco.style.display='flex';
+      t.loco.style.transform=`translate(${car.start.c*s}px,${car.start.r*s}px)`;
+      t.wagons.forEach(w=>{w.classList.remove('crashed');w.style.display='none';
+        w.style.transform=`translate(${car.start.c*s}px,${car.start.r*s}px)`;});
+      return {car, loco:t.loco, wagons:t.wagons,
+              trail:[{r:car.start.r,c:car.start.c,d:1}],
+              r:car.start.r, c:car.start.c, cameFrom:-1,
+              alive:true, headDone:false, done:false, emerged:1};
     });
 
-    // vérifie que chaque départ a bien une route
     for(const st of state){
       if(!grid[st.r][st.c]){endRace();
-        return flash(`Pose une route sur le départ A${st.car.id+1} !`,'fail');}
+        return flash(`Pose une route sur la gare A${st.car.id+1} !`,'fail');}
     }
 
-    let steps=0;
+    const totalLen=1+NWAGONS;
 
     function tick(){
-      // Plus de plafond global : si une voiture tourne en rond, elle tourne ;
-      // la course se termine quand toutes les voitures sont arrivées ou éliminées.
-      steps++;
-
-      // 1) calcule le prochain mouvement de chaque voiture encore active
+      // 1) mouvement de la tête (locomotive) pour chaque train actif dont la loco n'est pas arrivée
       const moves={};
       for(const st of state){
-        if(st.done||!st.alive){moves[st.car.id]=null;continue;}
+        if(!st.alive||st.done){moves[st.car.id]=null;continue;}
+        if(st.headDone){moves[st.car.id]='drain';continue;} // loco arrivée : on vide le trail
         moves[st.car.id]=computeNext(st);
-        // si false, la voiture vient d'être éliminée (st.alive=false) ; on continue
       }
 
-      // 2) détection de collision entre TOUTE paire de voitures actives en mouvement
-      const active=state.filter(st=>st.alive&&!st.done&&moves[st.car.id]);
-      for(let i=0;i<active.length;i++)for(let j=i+1;j<active.length;j++){
-        const a=active[i], b=active[j];
-        const ma=moves[a.car.id], mb=moves[b.car.id];
-        const sameCell = ma.nr===mb.nr && ma.nc===mb.nc;
-        const swap = ma.nr===b.r && ma.nc===b.c && mb.nr===a.r && mb.nc===a.c;
-        if(sameCell||swap){
-          // on applique tous les mouvements (les autres voitures avancent aussi visuellement)
-          for(const st of state){const m=moves[st.car.id];if(m&&st.alive)applyMove(st,m);}
-          const cr=sameCell?ma.nr:Math.round((a.r+b.r)/2);
-          const cc=sameCell?ma.nc:Math.round((a.c+b.c)/2);
-          wait(1, ()=>crash(cr,cc,a,b));
+      // 2) collisions : on compare les cases occupées par CHAQUE train après mouvement.
+      //    On calcule la future tête de chaque train actif.
+      const heads={};
+      for(const st of state){
+        const m=moves[st.car.id];
+        if(st.alive && !st.done && m && m!=='drain') heads[st.car.id]={r:m.nr,c:m.nc};
+      }
+      // occupation courante (hors tête future) de chaque train
+      function occupiedCells(st, futureHead){
+        // cases du train après avance : futureHead + trail tronqué
+        const cells=[];
+        if(futureHead)cells.push(futureHead);
+        const max = st.headDone ? st.trail.length : (totalLen-1);
+        for(let k=0;k<st.trail.length && cells.length<totalLen;k++)cells.push(st.trail[k]);
+        return cells;
+      }
+      const activeTrains=state.filter(st=>st.alive&&!st.done);
+      for(let i=0;i<activeTrains.length;i++)for(let j=i+1;j<activeTrains.length;j++){
+        const A=activeTrains[i], B=activeTrains[j];
+        const ca=occupiedCells(A, heads[A.car.id]);
+        const cb=occupiedCells(B, heads[B.car.id]);
+        let hit=null;
+        for(const pa of ca)for(const pb of cb){
+          if(pa.r===pb.r&&pa.c===pb.c){hit={r:pa.r,c:pa.c};break;}
+        }
+        if(hit){
+          // applique l'avance visible puis explose les deux trains
+          if(heads[A.car.id])advanceTrain(A,moves[A.car.id]);
+          if(heads[B.car.id])advanceTrain(B,moves[B.car.id]);
+          wait(1, ()=>crashTrains(hit.r,hit.c,A,B));
+          // les autres trains continuent : on planifie le prochain tick
+          wait(1, tick);
           return;
         }
       }
 
-      // 3) on applique les mouvements des voitures encore actives
-      let anyMoved=false;
+      // 3) avance chaque train
+      let anyActive=false;
       for(const st of state){
+        if(!st.alive||st.done)continue;
         const m=moves[st.car.id];
-        if(m && st.alive){applyMove(st,m);anyMoved=true;}
+        if(m==='drain' || st.headDone){ drainTrain(st); }
+        else if(m){ advanceTrain(st,m); }
+        if(!st.done && st.alive) anyActive=true;
       }
 
-      // 4) conditions de fin
+      // 4) fin ?
       const allFinished=state.every(st=>st.done||!st.alive);
       if(allFinished){
         endRace();
         const arrived=state.filter(st=>st.done).length;
-        const lost=state.filter(st=>!st.alive && !st.done).length;
-        if(arrived===state.length){ confetti(); return flash('🏁 Bravo ! Toutes les voitures sont arrivées !','win'); }
-        if(arrived>0 && lost>0){ confetti(); return flash(`🏁 ${arrived} arrivée(s), ${lost} éliminée(s).`,'win'); }
-        if(lost===state.length){ lightning(); return flash('⚡ Aucune voiture n\u2019a atteint son arrivée.','fail'); }
-        return;
+        const lost=state.filter(st=>!st.alive&&!st.done).length;
+        if(arrived===state.length){confetti();return flash('🏁 Bravo ! Tous les trains sont arrivés !','win');}
+        if(arrived>0){confetti();return flash(`🏁 ${arrived} train(s) arrivé(s), ${lost} détruit(s).`,'win');}
+        lightning();return flash('⚡ Aucun train n\u2019a atteint sa gare.','fail');
       }
-      if(!anyMoved){endRace();return;}
       wait(1, tick);
     }
 
-    // calcule le prochain pas d'une voiture (sans l'appliquer)
-    // Élimine UNE voiture sans arrêter la course de l'autre.
-    // kind: 'explode' = explosion + débris ; 'deadend' = fond rouge + alarme
+    // place visuellement loco + wagons selon le trail
+    function renderTrain(st){
+      // loco = trail[0]
+      if(st.trail.length>0 && !st.headDone){
+        const h=st.trail[0];
+        st.loco.style.display='flex';
+        st.loco.style.transform=`translate(${h.c*s}px,${h.r*s}px)`;
+        st.loco.querySelector('.body').style.transform=carTransform[h.d]||'';
+      }else{
+        st.loco.style.display='none';
+      }
+      // wagons = trail[1..NWAGONS]
+      for(let w=0;w<NWAGONS;w++){
+        const seg=st.trail[w+1];
+        const el=st.wagons[w];
+        if(seg && (w+1)<st.emerged){
+          el.style.display='flex';
+          el.style.transform=`translate(${seg.c*s}px,${seg.r*s}px)`;
+          el.querySelector('.body').style.transform=carTransform[seg.d]||'';
+        }else{
+          el.style.display='none';
+        }
+      }
+    }
+
+    // avance la tête d'une case (sortie de gare progressive)
+    function advanceTrain(st,m){
+      st.trail.unshift({r:m.nr,c:m.nc,d:m.d});
+      // limite la longueur du trail à 1+NWAGONS une fois le train entièrement sorti
+      if(st.trail.length>totalLen)st.trail.pop();
+      st.r=m.nr;st.c=m.nc;st.cameFrom=OPP[m.d];
+      if(st.emerged<totalLen)st.emerged++;
+      if(st.r===st.car.end.r && st.c===st.car.end.c){
+        st.headDone=true;  // la loco entre en gare ; les wagons vont suivre puis disparaître
+      }
+      renderTrain(st);
+    }
+
+    // la loco est arrivée : on retire la tête, les wagons rentrent un à un
+    function drainTrain(st){
+      st.headDone=true;
+      st.trail.shift();        // enlève le segment de tête (rentré en gare)
+      if(st.emerged>0)st.emerged--;
+      if(st.trail.length===0){ st.done=true; st.loco.style.display='none';
+        st.wagons.forEach(w=>w.style.display='none'); return; }
+      renderTrain(st);
+    }
+
     function eliminate(st, kind, msg){
       st.alive=false;
       const sCell=cells[st.r] && cells[st.r][st.c];
       if(kind==='explode'){
-        // animation d'explosion sur la voiture, puis débris persistants sur la case
-        st.el.classList.add('crashed');
+        st.loco.classList.add('crashed');
         const boom=document.createElement('div');boom.className='boom';boom.textContent='💥';
         boom.style.left=(st.c*s)+'px';boom.style.top=(st.r*s)+'px';
         board.appendChild(boom);
-        if(navigator.vibrate)navigator.vibrate(600);   // vibration longue : sortie de route/explosion
-        // après l'explosion, on cache la voiture et on pose un débris
+        if(navigator.vibrate)navigator.vibrate(600);
         setTimeout(()=>{
-          st.el.style.display='none';
+          st.loco.style.display='none';
+          st.wagons.forEach(w=>w.style.display='none');
           const debris=document.createElement('div');
           debris.className='debris';debris.textContent='🔥';
           debris.style.left=(st.c*s)+'px';debris.style.top=(st.r*s)+'px';
           board.appendChild(debris);
         },700);
       }else if(kind==='deadend'){
-        // fond rouge clignotant + alarme + voiture s'arrête là
         if(sCell){sCell.classList.add('deadend-flash');}
-        if(navigator.vibrate)navigator.vibrate(600);   // vibration longue : cul-de-sac
+        if(navigator.vibrate)navigator.vibrate(600);
         playAlarm();
       }
       flash(`${kind==='explode'?'💥':'🚨'} ${st.car.name} : ${msg}`,'fail');
@@ -1123,26 +1093,7 @@
 
     function computeNext(st){
       const cell=grid[st.r][st.c];
-      if(!cell){eliminate(st,'explode','route cassée 🚧');return false;}
-      if(st.r===st.car.end.r && st.c===st.car.end.c){st.done=true;return null;}
-
-      // TUILE BOUCLE
-      if(LOOP[cell.type]){
-        const exit=openDirs(cell)[0];
-        if(st.cameFrom!==exit && st.cameFrom!==-1){
-          eliminate(st,'explode','boucle non raccordée 🔌');return false;
-        }
-        const nr=st.r+DR[exit], nc=st.c+DC[exit];
-        if(nr<0||nr>=ROWS||nc<0||nc>=COLS){
-          eliminate(st,'explode','la boucle pointe hors plateau 🚧');return false;
-        }
-        const next=grid[nr][nc];
-        if(!next||!openDirs(next).includes(OPP[exit])){
-          eliminate(st,'explode','la boucle débouche dans le vide 🔌');return false;
-        }
-        return {d:exit, nr, nc, loop:true};
-      }
-
+      if(!cell){eliminate(st,'explode','rails coupés 🚧');return false;}
       const back=st.cameFrom;
       const reachable=d=>{
         const nr=st.r+DR[d], nc=st.c+DC[d];
@@ -1150,14 +1101,10 @@
         const next=grid[nr][nc];
         return !!next && openDirs(next).includes(OPP[d]);
       };
-
-      // TUILE À ROUTAGE DÉTERMINISTE OU ALTERNANT (T, X)
       if(ROUTE[cell.type] && back!==-1){
         const relIn=(back - cell.rot + 4) % 4;
         let relOutSpec=ROUTE[cell.type][relIn];
-        if(relOutSpec===undefined){
-          eliminate(st,'explode','entrée par un côté fermé 🔌');return false;
-        }
+        if(relOutSpec===undefined){eliminate(st,'explode','entrée par un côté fermé 🔌');return false;}
         let relOut;
         if(Array.isArray(relOutSpec)){
           const spec = cell.swap ? [relOutSpec[1], relOutSpec[0]] : relOutSpec;
@@ -1167,75 +1114,48 @@
           const newPtr=(p+1) % spec.length;
           xPointer[k]=newPtr;
           const cr=st.r, cc=st.c;
-          if(navigator.vibrate)navigator.vibrate(15);   // vibration courte : changement de sortie T
+          if(navigator.vibrate)navigator.vibrate(15);
           wait(0.5, ()=>redrawTeeWithPointer(cr,cc,relIn,newPtr));
-        }else{
-          relOut=relOutSpec;
-        }
+        }else relOut=relOutSpec;
         const d=(relOut + cell.rot) % 4;
         if(!reachable(d)){
           const nr=st.r+DR[d],nc=st.c+DC[d];
           const off=(nr<0||nr>=ROWS||nc<0||nc>=COLS);
-          eliminate(st,'explode', off?'route hors plateau 🚧':'routes non connectées 🔌');
+          eliminate(st,'explode', off?'rails hors plateau 🚧':'rails non connectés 🔌');
           return false;
         }
         return {d, nr:st.r+DR[d], nc:st.c+DC[d]};
       }
-
-      // Cas général
       const usable=openDirs(cell).filter(d=>d!==back && reachable(d));
       if(!usable.length){
         const offboard=openDirs(cell).filter(d=>d!==back).some(d=>{
           const nr=st.r+DR[d],nc=st.c+DC[d];
           return nr<0||nr>=ROWS||nc<0||nc>=COLS;
         });
-        // Cul-de-sac : la tuile n'a pas d'issue valable (pas une erreur "technique")
-        // -> fond rouge + alarme (sauf si c'est une sortie hors plateau pure)
-        if(offboard){
-          eliminate(st,'explode','route hors plateau 🚧');
-        }else{
-          eliminate(st,'deadend','cul-de-sac');
-        }
+        if(offboard)eliminate(st,'explode','rails hors plateau 🚧');
+        else eliminate(st,'deadend','cul-de-sac');
         return false;
       }
       const d=usable[0];
       return {d, nr:st.r+DR[d], nc:st.c+DC[d]};
     }
 
-    function applyMove(st,m){
-      if(m.loop){
-        // pirouette : la voiture tourne sur elle-même sur la case boucle, puis repart
-        st.body.style.transition='transform .5s ease-in-out';
-        st.body.style.transform=(carTransform[st.cameFrom]||'')+' rotate(360deg)';
-      }else{
-        st.body.style.transition='transform .3s ease';
-        st.body.style.transform=carTransform[m.d]||st.body.style.transform;
-      }
-      st.r=m.nr;st.c=m.nc;st.cameFrom=OPP[m.d];
-      st.el.style.transform=`translate(${st.c*s}px,${st.r*s}px)`;
-      if(st.r===st.car.end.r && st.c===st.car.end.c) st.done=true;
-    }
-
-    function crash(cr,cc,a,b){
-      endRace();
-      a.el.classList.add('crashed');b.el.classList.add('crashed');
-      // grosse explosion centrale
+    function crashTrains(cr,cc,a,b){
+      a.alive=false;b.alive=false;
+      [a,b].forEach(t=>{t.loco.classList.add('crashed');t.wagons.forEach(w=>w.classList.add('crashed'));});
       const boom=document.createElement('div');boom.className='boom big';boom.textContent='💥';
       boom.style.left=(cc*s)+'px';boom.style.top=(cr*s)+'px';
       board.appendChild(boom);
-      // débris persistants après l'explosion sur les deux véhicules
       setTimeout(()=>{
-        [a,b].forEach(car=>{
-          car.el.style.display='none';
-          const debris=document.createElement('div');
-          debris.className='debris';debris.textContent='🔥';
-          debris.style.left=(car.c*s)+'px';debris.style.top=(car.r*s)+'px';
+        [a,b].forEach(t=>{
+          t.loco.style.display='none';t.wagons.forEach(w=>w.style.display='none');
+          const debris=document.createElement('div');debris.className='debris';debris.textContent='🔥';
+          debris.style.left=(t.c*s)+'px';debris.style.top=(t.r*s)+'px';
           board.appendChild(debris);
         });
       },700);
-      if(navigator.vibrate)navigator.vibrate(900);   // vibration très longue : collision finale
-      playAlarm(true);
-      flash('💥 COLLISION ! Fin du jeu.','fail');
+      if(navigator.vibrate)navigator.vibrate(900);
+      flash('💥 Collision entre trains !','fail');
     }
 
     wait(0.85, tick);

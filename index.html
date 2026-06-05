@@ -72,9 +72,9 @@
   .car-sprite{
     position:absolute;width:var(--ts);height:var(--ts);top:1px;left:1px;
     z-index:20;pointer-events:none;display:flex;align-items:center;justify-content:center;
-    transition:transform .32s linear;
+    transition:transform .36s linear;
   }
-  .car-sprite .body{font-size:calc(var(--ts) * .6);filter:drop-shadow(0 2px 2px rgba(0,0,0,.5));transition:transform .3s ease;display:inline-block}
+  .car-sprite .body{font-size:calc(var(--ts) * .6);filter:drop-shadow(0 2px 2px rgba(0,0,0,.5));transition:transform .15s linear;display:inline-block}
   /* explosion de collision */
   .boom{
     position:absolute;width:var(--ts);height:var(--ts);z-index:30;pointer-events:none;
@@ -294,7 +294,7 @@
   const obstacles=Array.from({length:ROWS},()=>Array(COLS).fill(null));
 
   // Trois trains ; positions gare départ/arrivée tirées au sort.
-  const NWAGONS=3;
+  const NWAGONS=2;
   const CARS=[
     {id:0, name:'Rouge', color:'#e8403a', emoji:'🚂', start:{r:ROWS-1,c:0}, end:{r:0,c:COLS-1}},
     {id:1, name:'Bleu',  color:'#4d8cee', emoji:'🚂', start:{r:0,c:0}, end:{r:ROWS-1,c:COLS-1}},
@@ -935,7 +935,7 @@
       t.loco.querySelector('.body').style.transform=carTransform[1];
       t.loco.style.display='flex';
       t.loco.style.transform=`translate(${car.start.c*s}px,${car.start.r*s}px)`;
-      t.wagons.forEach(w=>{w.classList.remove('crashed');w.style.display='none';
+      t.wagons.forEach(w=>{w.classList.remove('crashed');w.style.display='none';w.dataset.shown='0';
         w.style.transform=`translate(${car.start.c*s}px,${car.start.r*s}px)`;});
       return {car, loco:t.loco, wagons:t.wagons,
               trail:[{r:car.start.r,c:car.start.c,d:1}],
@@ -1020,7 +1020,6 @@
 
     // place visuellement loco + wagons selon le trail
     function renderTrain(st){
-      // loco = trail[0]
       if(st.trail.length>0 && !st.headDone){
         const h=st.trail[0];
         st.loco.style.display='flex';
@@ -1029,16 +1028,28 @@
       }else{
         st.loco.style.display='none';
       }
-      // wagons = trail[1..NWAGONS]
       for(let w=0;w<NWAGONS;w++){
         const seg=st.trail[w+1];
         const el=st.wagons[w];
         if(seg && (w+1)<st.emerged){
-          el.style.display='flex';
-          el.style.transform=`translate(${seg.c*s}px,${seg.r*s}px)`;
+          const wasHidden = el.style.display==='none' || el.dataset.shown!=='1';
+          if(wasHidden){
+            // apparition : on place sans transition pour éviter un saut depuis l'origine
+            const prev=el.style.transition;
+            el.style.transition='none';
+            el.style.transform=`translate(${seg.c*s}px,${seg.r*s}px)`;
+            el.style.display='flex';
+            el.dataset.shown='1';
+            // force le reflow puis restaure la transition
+            void el.offsetWidth;
+            el.style.transition=prev|| '';
+          }else{
+            el.style.transform=`translate(${seg.c*s}px,${seg.r*s}px)`;
+          }
           el.querySelector('.body').style.transform=carTransform[seg.d]||'';
         }else{
           el.style.display='none';
+          el.dataset.shown='0';
         }
       }
     }

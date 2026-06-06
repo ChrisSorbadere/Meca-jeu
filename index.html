@@ -74,7 +74,13 @@
     z-index:20;pointer-events:none;display:flex;align-items:center;justify-content:center;
     transition:transform .36s linear;
   }
-  .car-sprite .body{font-size:calc(var(--ts) * .6);filter:drop-shadow(0 2px 2px rgba(0,0,0,.5));transition:transform .15s linear;display:inline-block}
+  .car-sprite .halo{
+    position:absolute;width:calc(var(--ts) * .82);height:calc(var(--ts) * .82);
+    border-radius:50%;background:var(--halo,#888);opacity:.55;
+    box-shadow:0 0 6px 2px var(--halo,#888);z-index:-1;
+  }
+  .car-sprite.wagon .halo{width:calc(var(--ts) * .68);height:calc(var(--ts) * .68);opacity:.45}
+  .car-sprite .body{font-size:calc(var(--ts) * .6);filter:drop-shadow(0 2px 2px rgba(0,0,0,.5));transition:transform .15s linear;display:inline-block;position:relative;z-index:1}
   /* explosion de collision */
   .boom{
     position:absolute;width:var(--ts);height:var(--ts);z-index:30;pointer-events:none;
@@ -182,7 +188,7 @@
 </style>
 </head>
 <body>
-  <h1>Constructeur de Route <span class="car">🚗</span></h1>
+  <h1>Constructeur de Route <span class="car">🚂</span></h1>
 
   <div class="board-wrap">
     <div id="board"></div>
@@ -440,13 +446,15 @@
   const trainEls=CARS.map(car=>{
     const loco=document.createElement('div');
     loco.className='car-sprite';loco.style.display='none';
-    loco.innerHTML=`<span class="body">${car.emoji}</span>`;
+    loco.style.setProperty('--halo',car.color);
+    loco.innerHTML=`<span class="halo"></span><span class="body">${car.emoji}</span>`;
     board.appendChild(loco);
     const wagons=[];
     for(let w=0;w<NWAGONS;w++){
       const wg=document.createElement('div');
       wg.className='car-sprite wagon';wg.style.display='none';
-      wg.innerHTML=`<span class="body">${WAGON_EMOJI}</span>`;
+      wg.style.setProperty('--halo',car.color);
+      wg.innerHTML=`<span class="halo"></span><span class="body">${WAGON_EMOJI}</span>`;
       board.appendChild(wg);
       wagons.push(wg);
     }
@@ -858,27 +866,6 @@
     document.querySelectorAll('.cell.deadend-flash').forEach(c=>c.classList.remove('deadend-flash'));
   }
 
-  // Petite alarme via Web Audio API : 2-3 bips selon la sévérité
-  let audioCtx=null;
-  function playAlarm(big){
-    try{
-      audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
-      const ctx=audioCtx;
-      const beeps = big ? [{f:200,t:0},{f:150,t:0.18},{f:100,t:0.36},{f:80,t:0.55}]
-                        : [{f:660,t:0},{f:440,t:0.15},{f:660,t:0.3}];
-      beeps.forEach(b=>{
-        const o=ctx.createOscillator(), g=ctx.createGain();
-        o.type='square'; o.frequency.value=b.f;
-        g.gain.value=0; o.connect(g); g.connect(ctx.destination);
-        const t0=ctx.currentTime+b.t;
-        g.gain.setValueAtTime(0,t0);
-        g.gain.linearRampToValueAtTime(0.15,t0+0.01);
-        g.gain.linearRampToValueAtTime(0,t0+0.12);
-        o.start(t0); o.stop(t0+0.14);
-      });
-    }catch(e){}
-  }
-
   // Confettis de réussite
   function confetti(){
     const colors=['#43aa8b','#4d8cee','#f4c430','#ee6c4d','#9b5de5','#ffd95e'];
@@ -966,23 +953,40 @@
         const m=moves[st.car.id];
         if(st.alive && !st.done && m && m!=='drain') heads[st.car.id]={r:m.nr,c:m.nc};
       }
-      // occupation courante (hors tête future) de chaque train
-      function occupiedCells(st, futureHead){
-        // cases du train après avance : futureHead + trail tronqué
+      // occupation courante de chaque train, avec la direction de passage de chaque segment
+      function occupiedCells(st, futureHead, futureDir){
         const cells=[];
-        if(futureHead)cells.push(futureHead);
-        const max = st.headDone ? st.trail.length : (totalLen-1);
-        for(let k=0;k<st.trail.length && cells.length<totalLen;k++)cells.push(st.trail[k]);
+        if(futureHead)cells.push({r:futureHead.r,c:futureHead.c,d:futureDir});
+        for(let k=0;k<st.trail.length && cells.length<totalLen;k++){
+          const seg=st.trail[k];cells.push({r:seg.r,c:seg.c,d:seg.d});
+        }
         return cells;
+      }
+      // Voie utilisée sur une case selon la direction de mouvement d.
+      // Sur une dcurve, deux voies disjointes coexistent ; ailleurs, voie unique (0).
+      function laneOf(r,c,d){
+        const cell=grid[r] && grid[r][c];
+        if(!cell || cell.type!=='dcurve' || d==null) return 0;
+        // côté d'entrée (absolu) = OPP[d] ; ramené au repère non tourné de la tuile
+        const entryAbs=OPP[d];
+        const rel=(entryAbs - cell.rot + 4) % 4;
+        // rot 0 : voie A = côtés {0(N),1(E)}, voie B = côtés {2(S),3(O)}
+        return (rel===0||rel===1) ? 1 : 2;
       }
       const activeTrains=state.filter(st=>st.alive&&!st.done);
       for(let i=0;i<activeTrains.length;i++)for(let j=i+1;j<activeTrains.length;j++){
         const A=activeTrains[i], B=activeTrains[j];
-        const ca=occupiedCells(A, heads[A.car.id]);
-        const cb=occupiedCells(B, heads[B.car.id]);
+        const ha=heads[A.car.id], hb=heads[B.car.id];
+        const ca=occupiedCells(A, ha, ha?moves[A.car.id].d:null);
+        const cb=occupiedCells(B, hb, hb?moves[B.car.id].d:null);
         let hit=null;
         for(const pa of ca)for(const pb of cb){
-          if(pa.r===pb.r&&pa.c===pb.c){hit={r:pa.r,c:pa.c};break;}
+          if(pa.r===pb.r&&pa.c===pb.c){
+            // exception : même case dcurve mais voies différentes -> pas de collision
+            const la=laneOf(pa.r,pa.c,pa.d), lb=laneOf(pb.r,pb.c,pb.d);
+            if(la!==0 && lb!==0 && la!==lb) continue;
+            hit={r:pa.r,c:pa.c};break;
+          }
         }
         if(hit){
           // applique l'avance visible puis explose les deux trains
@@ -1097,7 +1101,6 @@
       }else if(kind==='deadend'){
         if(sCell){sCell.classList.add('deadend-flash');}
         if(navigator.vibrate)navigator.vibrate(600);
-        playAlarm();
       }
       flash(`${kind==='explode'?'💥':'🚨'} ${st.car.name} : ${msg}`,'fail');
     }

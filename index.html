@@ -927,7 +927,7 @@
       return {car, loco:t.loco, wagons:t.wagons,
               trail:[{r:car.start.r,c:car.start.c,d:1}],
               r:car.start.r, c:car.start.c, cameFrom:-1,
-              alive:true, headDone:false, done:false, emerged:1};
+              alive:true, headDone:false, done:false, emerged:1, pendingTee:null};
     });
 
     for(const st of state){
@@ -1060,13 +1060,21 @@
 
     // avance la tête d'une case (sortie de gare progressive)
     function advanceTrain(st,m){
+      // applique l'incrément d'alternance du T que la loco vient de franchir réellement
+      if(st.pendingTee){
+        const {k,newPtr,relIn}=st.pendingTee;
+        xPointer[k]=newPtr;
+        const cr=st.trail[0].r, cc=st.trail[0].c;  // case du T qu'on quitte
+        if(navigator.vibrate)navigator.vibrate(15);
+        wait(0.5, ()=>redrawTeeWithPointer(cr,cc,relIn,newPtr));
+        st.pendingTee=null;
+      }
       st.trail.unshift({r:m.nr,c:m.nc,d:m.d});
-      // limite la longueur du trail à 1+NWAGONS une fois le train entièrement sorti
       if(st.trail.length>totalLen)st.trail.pop();
       st.r=m.nr;st.c=m.nc;st.cameFrom=OPP[m.d];
       if(st.emerged<totalLen)st.emerged++;
       if(st.r===st.car.end.r && st.c===st.car.end.c){
-        st.headDone=true;  // la loco entre en gare ; les wagons vont suivre puis disparaître
+        st.headDone=true;
       }
       renderTrain(st);
     }
@@ -1125,12 +1133,10 @@
           const k=st.r+','+st.c+'/'+relIn;
           const p=(xPointer[k]||0) % spec.length;
           relOut=spec[p];
-          const newPtr=(p+1) % spec.length;
-          xPointer[k]=newPtr;
-          const cr=st.r, cc=st.c;
-          if(navigator.vibrate)navigator.vibrate(15);
-          wait(0.5, ()=>redrawTeeWithPointer(cr,cc,relIn,newPtr));
-        }else relOut=relOutSpec;
+          // NE PAS incrémenter ici : l'incrément se fait au franchissement réel (advanceTrain),
+          // pour éviter les doubles incréments quand le tick est abandonné (collision ailleurs).
+          st.pendingTee={k, newPtr:(p+1)%spec.length, relIn};
+        }else{ relOut=relOutSpec; st.pendingTee=null; }
         const d=(relOut + cell.rot) % 4;
         if(!reachable(d)){
           const nr=st.r+DR[d],nc=st.c+DC[d];
@@ -1140,6 +1146,7 @@
         }
         return {d, nr:st.r+DR[d], nc:st.c+DC[d]};
       }
+      st.pendingTee=null;
       const usable=openDirs(cell).filter(d=>d!==back && reachable(d));
       if(!usable.length){
         const offboard=openDirs(cell).filter(d=>d!==back).some(d=>{

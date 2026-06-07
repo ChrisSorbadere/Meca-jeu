@@ -149,8 +149,12 @@
   .save-row input{flex:1;background:var(--grid);color:var(--txt);border:none;
     border-radius:8px;padding:9px;font-family:inherit;font-size:13px}
   .save-row button{background:var(--green);font-size:12px;padding:9px 12px}
-  .saves-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:5px;
-    background:var(--bg);border-radius:8px;padding:6px;min-height:120px}
+  .saves-list{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    display:flex;flex-direction:column;gap:5px;
+    background:var(--bg);border-radius:8px;padding:6px;min-height:120px;max-height:48vh}
+  .saves-list::-webkit-scrollbar{width:8px}
+  .saves-list::-webkit-scrollbar-thumb{background:var(--roadline);border-radius:4px}
+  .saves-list::-webkit-scrollbar-track{background:transparent}
   .save-item{display:flex;align-items:center;gap:6px;background:var(--grid);
     border-radius:8px;padding:8px 10px}
   .save-item .name{flex:1;font-size:13px;font-weight:bold;white-space:nowrap;
@@ -197,8 +201,8 @@
   <div class="controls">
     <div class="palette" id="palette"></div>
     <div class="obst-row">
-      <span class="obst-label">Obstacles : <b id="obst-val">26</b></span>
-      <input type="range" id="obst-slider" min="26" max="50" value="26" step="2">
+      <span class="obst-label">Obstacles : <b id="obst-val">36</b></span>
+      <input type="range" id="obst-slider" min="36" max="60" value="36" step="2">
     </div>
     <div class="tools">
       <button id="gen-obst">⛰️ Obstacles</button>
@@ -667,7 +671,7 @@
   const eraseBtn=document.getElementById('erase');
 
   // ---- Curseur nombre d'obstacles ----
-  let nObstacles=26;
+  let nObstacles=36;
   const obstSlider=document.getElementById('obst-slider');
   const obstVal=document.getElementById('obst-val');
   obstSlider.addEventListener('input',()=>{
@@ -710,7 +714,10 @@
     let placed=0, guard=0;
     while(placed<total && guard++<400){
       const fam=OBSTACLE_FAMILIES[Math.floor(Math.random()*OBSTACLE_FAMILIES.length)];
-      const size=Math.min(1+Math.floor(Math.random()*4), total-placed); // 1 à 4
+      // taille du massif pondérée : 1→10% 2→30% 3→30% 4→20% 5→10%
+      const rTaille=Math.random();
+      let taille = rTaille<0.10?1 : rTaille<0.40?2 : rTaille<0.70?3 : rTaille<0.90?4 : 5;
+      const size=Math.min(taille, total-placed);
       // case de départ libre
       let r0,c0,t=0;
       do{r0=Math.floor(Math.random()*ROWS);c0=Math.floor(Math.random()*COLS);t++;}
@@ -753,21 +760,22 @@
   // Garantit qu'une solution existe (chemins possibles entre chaque A/B en évitant les obstacles).
   function generateObstacles(){
     if(running)return;
-    for(let attempt=0;attempt<60;attempt++){
+    for(let attempt=0;attempt<300;attempt++){
       const {pairs,obst}=randomSetup(nObstacles);
       const obstSet=new Set(obst.map(o=>obKey(o.r,o.c)));
       const tmp=CARS.map((car,i)=>({start:pairs[i].start,end:pairs[i].end}));
-      // vérifie qu'un chemin existe pour chaque voiture (sinon le défi serait insoluble)
       const endpoints=new Set();
       tmp.forEach(c=>{endpoints.add(obKey(c.start.r,c.start.c));endpoints.add(obKey(c.end.r,c.end.c));});
       let solvable=true;
       for(const car of tmp){
         const blocked=new Set(obstSet);endpoints.forEach(k=>blocked.add(k));
         blocked.delete(obKey(car.start.r,car.start.c));blocked.delete(obKey(car.end.r,car.end.c));
-        if(!pathAvoid(car.start,car.end,blocked,SINUOSITY)){solvable=false;break;}
+        // plusieurs essais de chemin (pathAvoid est glouton/aléatoire)
+        let found=false;
+        for(let i=0;i<30 && !found;i++){if(pathAvoid(car.start,car.end,blocked,SINUOSITY))found=true;}
+        if(!found){solvable=false;break;}
       }
       if(!solvable)continue;
-      // applique : positions + obstacles, grille vide (au joueur de tracer)
       CARS.forEach((car,i)=>{car.start=pairs[i].start;car.end=pairs[i].end;});
       for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){obstacles[r][c]=null;grid[r][c]=null;}
       obst.forEach(o=>{obstacles[o.r][o.c]=o.emoji;});
@@ -775,7 +783,7 @@
       draw();autosave();
       return;
     }
-    flash('Placement difficile, r\u00e9essaie',  'fail');
+    flash('Trop d\u2019obstacles ici, r\u00e9essaie ou r\u00e9duis le curseur','fail');
   }
   function dirTo(r,c,nr,nc){
     if(nr<r)return 0; if(nr>r)return 2; if(nc>c)return 1; return 3;

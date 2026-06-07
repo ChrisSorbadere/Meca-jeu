@@ -946,75 +946,63 @@
     const totalLen=1+NWAGONS;
 
     function tick(){
-      // 1) mouvement de la tête (locomotive) pour chaque train actif dont la loco n'est pas arrivée
+      // 1) calcule le mouvement de la tête de chaque train actif
       const moves={};
       for(const st of state){
         if(!st.alive||st.done){moves[st.car.id]=null;continue;}
-        if(st.headDone){moves[st.car.id]='drain';continue;} // loco arrivée : on vide le trail
+        if(st.headDone){moves[st.car.id]='drain';continue;}
         moves[st.car.id]=computeNext(st);
       }
 
-      // 2) collisions : on compare les cases occupées par CHAQUE train après mouvement.
-      //    On calcule la future tête de chaque train actif.
-      const heads={};
-      for(const st of state){
-        const m=moves[st.car.id];
-        if(st.alive && !st.done && m && m!=='drain') heads[st.car.id]={r:m.nr,c:m.nc};
-      }
-      // occupation courante de chaque train, avec la direction de passage de chaque segment
-      function occupiedCells(st, futureHead, futureDir){
-        const cells=[];
-        if(futureHead)cells.push({r:futureHead.r,c:futureHead.c,d:futureDir});
-        for(let k=0;k<st.trail.length && cells.length<totalLen;k++){
-          const seg=st.trail[k];cells.push({r:seg.r,c:seg.c,d:seg.d});
-        }
-        return cells;
-      }
-      // Voie utilisée sur une case selon la direction de mouvement d.
-      // Sur une dcurve, deux voies disjointes coexistent ; ailleurs, voie unique (0).
-      function laneOf(r,c,d){
-        const cell=grid[r] && grid[r][c];
-        if(!cell || cell.type!=='dcurve' || d==null) return 0;
-        // côté d'entrée (absolu) = OPP[d] ; ramené au repère non tourné de la tuile
-        const entryAbs=OPP[d];
-        const rel=(entryAbs - cell.rot + 4) % 4;
-        // rot 0 : voie A = côtés {0(N),1(E)}, voie B = côtés {2(S),3(O)}
-        return (rel===0||rel===1) ? 1 : 2;
-      }
-      const activeTrains=state.filter(st=>st.alive&&!st.done);
-      for(let i=0;i<activeTrains.length;i++)for(let j=i+1;j<activeTrains.length;j++){
-        const A=activeTrains[i], B=activeTrains[j];
-        const ha=heads[A.car.id], hb=heads[B.car.id];
-        const ca=occupiedCells(A, ha, ha?moves[A.car.id].d:null);
-        const cb=occupiedCells(B, hb, hb?moves[B.car.id].d:null);
-        let hit=null;
-        for(const pa of ca)for(const pb of cb){
-          if(pa.r===pb.r&&pa.c===pb.c){
-            // exception : même case dcurve mais voies différentes -> pas de collision
-            const la=laneOf(pa.r,pa.c,pa.d), lb=laneOf(pb.r,pb.c,pb.d);
-            if(la!==0 && lb!==0 && la!==lb) continue;
-            hit={r:pa.r,c:pa.c};break;
-          }
-        }
-        if(hit){
-          // applique l'avance visible puis explose les deux trains
-          if(heads[A.car.id])advanceTrain(A,moves[A.car.id]);
-          if(heads[B.car.id])advanceTrain(B,moves[B.car.id]);
-          wait(1, ()=>crashTrains(hit.r,hit.c,A,B));
-          // les autres trains continuent : on planifie le prochain tick
-          wait(1, tick);
-          return;
-        }
-      }
-
-      // 3) avance chaque train
-      let anyActive=false;
+      // 2) applique les mouvements (avance / drain) AVANT de tester les collisions,
+      //    pour comparer les occupations RÉELLES après déplacement (évite les faux
+      //    positifs quand un train libère une case qu'un autre prend au même tick).
+      const prevHead={};
+      for(const st of state){ if(st.alive&&!st.done) prevHead[st.car.id]={r:st.r,c:st.c}; }
       for(const st of state){
         if(!st.alive||st.done)continue;
         const m=moves[st.car.id];
         if(m==='drain' || st.headDone){ drainTrain(st); }
         else if(m){ advanceTrain(st,m); }
-        if(!st.done && st.alive) anyActive=true;
+      }
+
+      // 3) collisions : deux trains occupent-ils réellement une même case ?
+      function laneOf(r,c,d){
+        const cell=grid[r] && grid[r][c];
+        if(!cell || cell.type!=='dcurve' || d==null) return 0;
+        const entryAbs=OPP[d];
+        const rel=(entryAbs - cell.rot + 4) % 4;
+        return (rel===0||rel===1) ? 1 : 2;
+      }
+      function cellsOf(st){
+        // cases réellement occupées (loco + wagons visibles), avec direction
+        const out=[];
+        const max=Math.min(st.trail.length, st.emerged);
+        for(let k=0;k<max;k++){const seg=st.trail[k];out.push({r:seg.r,c:seg.c,d:seg.d});}
+        return out;
+      }
+      // Un train dont la locomotive est déjà entrée en gare (headDone) est en phase de
+      // rangement : ses wagons rentrent et ne provoquent plus d'accident.
+      const activeTrains=state.filter(st=>st.alive&&!st.done&&!st.headDone);
+      for(let i=0;i<activeTrains.length;i++)for(let j=i+1;j<activeTrains.length;j++){
+        const A=activeTrains[i], B=activeTrains[j];
+        const ca=cellsOf(A), cb=cellsOf(B);
+        let hit=null;
+        for(const pa of ca)for(const pb of cb){
+          if(pa.r===pb.r&&pa.c===pb.c){
+            const la=laneOf(pa.r,pa.c,pa.d), lb=laneOf(pb.r,pb.c,pb.d);
+            if(la!==0 && lb!==0 && la!==lb) continue; // dcurve voies différentes : OK
+            hit={r:pa.r,c:pa.c};break;
+          }
+        }
+        // échange frontal : les deux locos ont permuté leurs cases (se sont croisées)
+        if(!hit){
+          const pa=prevHead[A.car.id], pb=prevHead[B.car.id];
+          if(pa&&pb&&A.r===pb.r&&A.c===pb.c&&B.r===pa.r&&B.c===pa.c){
+            hit={r:A.r,c:A.c};
+          }
+        }
+        if(hit){ wait(1, ()=>crashTrains(hit.r,hit.c,A,B)); wait(1, tick); return; }
       }
 
       // 4) fin ?

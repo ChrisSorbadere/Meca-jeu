@@ -124,17 +124,34 @@
 
   /* controls */
   .controls{width:100%;max-width:420px;display:flex;flex-direction:column;gap:8px}
+
+  /* ----- Mise en page paysage (tablette) : plateau à gauche, contrôles à droite ----- */
+  @media (orientation:landscape) and (min-width:820px){
+    body{
+      flex-direction:row;flex-wrap:wrap;align-items:flex-start;justify-content:center;
+      padding:10px;gap:16px;overflow:auto;
+    }
+    h1{width:100%;font-size:20px;margin-bottom:2px}
+    .board-wrap{flex:0 0 auto}
+    .controls{
+      max-width:none;width:auto;flex:1 1 320px;min-width:300px;max-width:440px;
+      align-self:stretch;
+    }
+    /* la liste de circuits peut être un peu plus haute en paysage */
+    .saves-list{max-height:60vh}
+  }
   .palette{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
   .ptile{
-    height:56px;background:var(--panel);border-radius:8px;cursor:pointer;
+    height:62px;background:var(--panel);border-radius:8px;cursor:pointer;
     border:2px solid transparent;padding:2px 2px 0;display:flex;flex-direction:column;
   }
   .ptile.active{border-color:var(--roadline);box-shadow:0 0 0 2px var(--roadline)}
   .ptile svg{width:100%;flex:1;min-height:0}
-  .pt-label{font-size:7px;text-align:center;color:var(--muted);padding:1px 0;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pt-label{font-size:9px;text-align:center;color:var(--muted);padding:2px 0;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-  .tools{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
-  .tools button{font-size:11px;padding:9px 2px}
+  .tools{display:grid;grid-template-columns:repeat(5,1fr);gap:5px}
+  .tools button{font-size:10px;padding:9px 2px}
+  .tools button:disabled{opacity:.4;cursor:default}
   /* Modale Circuits */
   .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;
     display:none;align-items:center;justify-content:center;padding:16px}
@@ -182,8 +199,8 @@
   .btn-pause:disabled,.btn-stop:disabled{opacity:.4}
   .speed{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
   .speed-label{font-size:11px;color:var(--muted);font-weight:bold}
-  .speed-btn{flex:1;padding:8px 4px;font-size:12px;background:var(--grid)}
-  .speed-btn.active{background:var(--roadline);color:#1a1a1a}
+  .speed-btn,.train-btn{flex:1;padding:8px 4px;font-size:12px;background:var(--grid)}
+  .speed-btn.active,.train-btn.active{background:var(--roadline);color:#1a1a1a}
   #msg{text-align:center;font-size:13px;font-weight:bold;min-height:18px}
   .win{color:#7ef0d2}
   .fail{color:#ffb59e}
@@ -203,12 +220,20 @@
     <div class="obst-row">
       <span class="obst-label">Obstacles : <b id="obst-val">36</b></span>
       <input type="range" id="obst-slider" min="36" max="60" value="36" step="2">
+      <span class="obst-label">🛤️ <b id="tiles">0</b></span>
     </div>
     <div class="tools">
+      <button id="undo" disabled>↩️ Annuler</button>
       <button id="gen-obst">⛰️ Obstacles</button>
       <button id="erase">🧽 Gomme</button>
       <button id="clear">🗑️ Effacer</button>
       <button id="save">💾 Circuits</button>
+    </div>
+    <div class="speed" id="trains-row">
+      <span class="speed-label">Trains :</span>
+      <button class="train-btn" data-n="1">1 🚂</button>
+      <button class="train-btn" data-n="2">2 🚂</button>
+      <button class="train-btn active" data-n="3">3 🚂</button>
     </div>
     <div class="play-row">
       <button id="go" class="btn-go">▶ Lancer</button>
@@ -222,7 +247,7 @@
       <button class="speed-btn" data-mult="0.5">🐇 Rapide</button>
     </div>
     <div id="msg"></div>
-    <p class="hint">🚂 <b>rouge</b> A1→B1 &nbsp;•&nbsp; 🚂 <b>bleu</b> A2→B2 &nbsp;•&nbsp; 🚂 <b>jaune</b> A3→B3. <b>Obstacles</b> place les gares, <b>à toi de tracer les rails</b>. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : sortie des T/Y. Chaque train = loco + 3 wagons. Évite les collisions 💥&nbsp;!</p>
+    <p class="hint">🚂 <b>rouge</b> A1→B1 &nbsp;•&nbsp; 🚂 <b>bleu</b> A2→B2 &nbsp;•&nbsp; 🚂 <b>jaune</b> A3→B3. <b>Obstacles</b> place les gares, <b>à toi de tracer les rails</b>. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : sortie des T/Y • <b>↩️</b> : annuler. Chaque train = loco + 2 wagons. Évite les collisions 💥 — <b>les épaves bloquent la voie</b> ! Moins de tuiles = plus d'étoiles ⭐</p>
   </div>
 
   <!-- Modale Circuits -->
@@ -247,8 +272,20 @@
 
   // adaptive tile size: fit board width to screen (portrait), capped
   function setTileSize(){
-    const avail=Math.min(window.innerWidth-16, 420);
-    const ts=Math.floor((avail-2-(COLS-1)) / COLS); // minus padding+gaps
+    const landscape = (window.matchMedia
+      ? window.matchMedia('(orientation:landscape) and (min-width:820px)').matches
+      : (window.innerWidth>window.innerHeight && window.innerWidth>=820));
+    let avail;
+    if(landscape){
+      // en paysage, le plateau est borné par la hauteur dispo (titre + marges réservés)
+      // et par ~60% de la largeur (le reste pour la colonne de contrôles)
+      const byHeight = window.innerHeight - 70;
+      const byWidth  = window.innerWidth * 0.58;
+      avail = Math.min(byHeight, byWidth, 620);
+    }else{
+      avail = Math.min(window.innerWidth-16, 420);
+    }
+    const ts=Math.floor((avail-2-(COLS-1)) / COLS);
     document.documentElement.style.setProperty('--ts', ts+'px');
     return ts;
   }
@@ -311,6 +348,13 @@
     {id:2, name:'Jaune', color:'#f4c430', emoji:'🚂', start:{r:0,c:Math.floor(COLS/2)}, end:{r:ROWS-1,c:Math.floor(COLS/2)}}
   ];
   const WAGON_EMOJI='🚃';
+  // Nombre de trains actifs (difficulté). Les trains au-delà sont ignorés.
+  let nTrains=3;
+  const activeCars=()=>CARS.slice(0,nTrains);
+  function syncTrainsUI(){
+    document.querySelectorAll('.train-btn').forEach(b=>
+      b.classList.toggle('active',parseInt(b.dataset.n,10)===nTrains));
+  }
 
   const rot=(d,t)=>(d+t)%4;
   const openDirs=cell=>cell?TYPES[cell.type].open.map(d=>rot(d,cell.rot)):[];
@@ -404,7 +448,7 @@
 
   // repère un point (start/end) -> {carIndex, kind} pour le marquage
   function markerAt(r,c){
-    for(const car of CARS){
+    for(const car of activeCars()){
       if(car.start.r===r&&car.start.c===c) return {car, kind:'A'};
       if(car.end.r===r&&car.end.c===c) return {car, kind:'B'};
     }
@@ -467,8 +511,30 @@
   // compat : carEls[i] = la locomotive (pour le code STOP existant)
   const carEls=trainEls.map(t=>t.loco);
 
+  // ---- Annuler (pile d'états sérialisés, 50 max) ----
+  const undoStack=[];
+  let undoBtnEl=null;   // affecté plus bas, après la création du DOM
+  function updateUndoBtn(){if(undoBtnEl)undoBtnEl.disabled=!undoStack.length;}
+  function pushUndo(){
+    undoStack.push(serializeGrid());
+    if(undoStack.length>50)undoStack.shift();
+    updateUndoBtn();
+  }
+  function doUndo(){
+    if(running||!undoStack.length)return;
+    deserializeGrid(undoStack.pop());
+    draw();autosave();updateUndoBtn();
+  }
+  function tileCount(){
+    let n=0;
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(grid[r][c])n++;
+    return n;
+  }
+
   function cellClick(r,c){
     if(obstacles[r][c])return;            // case obstacle : interdite
+    if(eraseMode && !grid[r][c])return;   // rien à gommer : pas d'état empilé
+    pushUndo();
     if(eraseMode){grid[r][c]=null;draw();autosave();return;}
     const cur=grid[r][c];
     if(cur && cur.type===selectedType){
@@ -485,6 +551,7 @@
   // clic droit / appui long : sur T et X, change l'ordre des sorties ; sinon pivote
   function altAction(r,c){
     const cur=grid[r][c];if(!cur)return;
+    pushUndo();
     if(hasAlternance(cur.type)){
       // appui long sur un T : inverse l'ordre de l'alternance (1 ↔ 2)
       cur.swap=!cur.swap;
@@ -519,6 +586,8 @@
         el.insertAdjacentHTML('afterbegin',tileSVG(cell.type,cell.rot,ord));
       }
     }
+    const tc=document.getElementById('tiles');
+    if(tc)tc.textContent=tileCount();
   }
   function redrawTeeWithPointer(r,c,relIn,ptr){
     const cell=grid[r][c];if(!cell||!hasAlternance(cell.type))return;
@@ -535,7 +604,7 @@
 
   // ============== SYSTÈME DE SAUVEGARDE ==============
   // Format : objet JSON {g:grille, o:obstacles, c:positions voitures}
-  const TYPE_CODE={straight:'s',turn:'t',tee:'T',tee_l:'L',cross:'x',dcurve:'d'};
+  const TYPE_CODE={straight:'s',turn:'t',tee:'T',tee_l:'L',cross:'x',dcurve:'d',ycurve:'y'};
   const CODE_TYPE=Object.fromEntries(Object.entries(TYPE_CODE).map(([k,v])=>[v,k]));
   function serializeGrid(){
     const cells=[];
@@ -546,7 +615,7 @@
     const obs=[];
     for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)obs.push(obstacles[r][c]||'');
     const cars=CARS.map(c=>({s:[c.start.r,c.start.c],e:[c.end.r,c.end.c]}));
-    return JSON.stringify({g:cells.join('|'), o:obs.join('|'), c:cars});
+    return JSON.stringify({g:cells.join('|'), o:obs.join('|'), c:cars, n:nTrains});
   }
   function deserializeGrid(str){
     if(!str||typeof str!=='string')return false;
@@ -571,6 +640,8 @@
     // positions voitures
     if(Array.isArray(data.c)){data.c.forEach((cc,i)=>{if(CARS[i]&&cc){
       CARS[i].start={r:cc.s[0],c:cc.s[1]};CARS[i].end={r:cc.e[0],c:cc.e[1]};}});}
+    // nombre de trains actifs
+    if(data.n){nTrains=Math.min(3,Math.max(1,data.n));syncTrainsUI();}
     return true;
   }
 
@@ -617,6 +688,7 @@
     const saves=loadSaves();
     const s=saves.find(x=>x.name===name);
     if(!s)return;
+    pushUndo();
     if(deserializeGrid(s.grid)){
       draw(); autosave();
       flash(`📂 "${name}" chargé`,'win');
@@ -665,6 +737,16 @@
   document.getElementById('save-btn').onclick=()=>{
     saveCircuit(document.getElementById('save-name').value);
   };
+
+  undoBtnEl=document.getElementById('undo');
+  undoBtnEl.onclick=doUndo;
+  document.querySelectorAll('.train-btn').forEach(b=>{
+    b.onclick=()=>{
+      if(running)return;
+      nTrains=parseInt(b.dataset.n,10);
+      syncTrainsUI();draw();autosave();
+    };
+  });
 
   loadAutosave();
 
@@ -744,11 +826,12 @@
   function randomSetup(nObst){
     const used=new Set();
     const obst=placeObstacles(nObst, used);
-    function freeCell(){let r,c,t=0;do{r=Math.floor(Math.random()*ROWS);c=Math.floor(Math.random()*COLS);t++;}while(used.has(obKey(r,c))&&t<300);used.add(obKey(r,c));return {r,c};}
+    function freeCell(){let r,c,t=0;do{r=Math.floor(Math.random()*ROWS);c=Math.floor(Math.random()*COLS);t++;}while(used.has(obKey(r,c))&&t<300);if(used.has(obKey(r,c)))return null;used.add(obKey(r,c));return {r,c};}
     const pairs=[];
     for(let i=0;i<CARS.length;i++){
       let s,e,tries=0;
-      do{s=freeCell();e=freeCell();tries++;}while(distM(s,e)<ROWS-2 && tries<60);
+      do{s=freeCell();e=freeCell();tries++;}while(s&&e&&distM(s,e)<ROWS-2 && tries<60);
+      if(!s||!e)return null;
       pairs.push({start:s,end:e});
     }
     return {pairs,obst};
@@ -761,9 +844,11 @@
   function generateObstacles(){
     if(running)return;
     for(let attempt=0;attempt<300;attempt++){
-      const {pairs,obst}=randomSetup(nObstacles);
+      const setup=randomSetup(nObstacles);
+      if(!setup)continue;
+      const {pairs,obst}=setup;
       const obstSet=new Set(obst.map(o=>obKey(o.r,o.c)));
-      const tmp=CARS.map((car,i)=>({start:pairs[i].start,end:pairs[i].end}));
+      const tmp=activeCars().map((car,i)=>({start:pairs[i].start,end:pairs[i].end}));
       const endpoints=new Set();
       tmp.forEach(c=>{endpoints.add(obKey(c.start.r,c.start.c));endpoints.add(obKey(c.end.r,c.end.c));});
       let solvable=true;
@@ -776,6 +861,7 @@
         if(!found){solvable=false;break;}
       }
       if(!solvable)continue;
+      pushUndo();
       CARS.forEach((car,i)=>{car.start=pairs[i].start;car.end=pairs[i].end;});
       for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){obstacles[r][c]=null;grid[r][c]=null;}
       obst.forEach(o=>{obstacles[o.r][o.c]=o.emoji;});
@@ -788,10 +874,32 @@
   function dirTo(r,c,nr,nc){
     if(nr<r)return 0; if(nr>r)return 2; if(nc>c)return 1; return 3;
   }
+  // Plus court chemin en cases (BFS) entre deux points en évitant les obstacles.
+  // Sert de référence pour le score en étoiles. Renvoie null si aucun chemin.
+  function bfsLen(s,e){
+    if(s.r===e.r&&s.c===e.c)return 1;
+    const dist={};dist[obKey(s.r,s.c)]=1;
+    const q=[[s.r,s.c]];
+    while(q.length){
+      const [r,c]=q.shift();const d=dist[obKey(r,c)];
+      for(const[dr,dc]of[[-1,0],[1,0],[0,1],[0,-1]]){
+        const nr=r+dr,nc=c+dc;
+        if(nr<0||nr>=ROWS||nc<0||nc>=COLS)continue;
+        if(obstacles[nr][nc])continue;
+        const k=obKey(nr,nc);if(dist[k])continue;
+        dist[k]=d+1;
+        if(nr===e.r&&nc===e.c)return d+1;
+        q.push([nr,nc]);
+      }
+    }
+    return null;
+  }
 
   document.getElementById('gen-obst').onclick=generateObstacles;
   eraseBtn.onclick=()=>{eraseMode=!eraseMode;eraseBtn.style.outline=eraseMode?'2px solid var(--accent)':'';};
   document.getElementById('clear').onclick=()=>{if(running)return;
+    const hasContent=grid.some(row=>row.some(Boolean))||obstacles.some(row=>row.some(Boolean));
+    if(hasContent)pushUndo();
     for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){grid[r][c]=null;obstacles[r][c]=null;}
     flash('',null);draw();autosave();};
 
@@ -838,7 +946,7 @@
     if(!running)return;
     paused=!paused;
     pauseBtn.textContent=paused?'▶ Reprendre':'⏸ Pause';
-    flash(paused?'⏸ En pause':'Les voitures roulent…', paused?null:null);
+    flash(paused?'⏸ En pause':'Les trains roulent…', null);
     if(!paused && resumeFn){ const f=resumeFn; resumeFn=null; f(); }
   };
 
@@ -859,7 +967,7 @@
       body.style.transform='';
     });
     clearBooms();
-    draw();
+    if(pendingRelayout)relayout(); else draw();
     flash('⏹ Arrêté. Ajuste l\u2019ordre des sorties puis relance ▶','win');
   };
 
@@ -917,15 +1025,32 @@
     const s=step1();
     function endRace(){ running=false; paused=false; resumeFn=null;
       pauseBtn.disabled=true; pauseBtn.textContent='⏸ Pause';
-      stopBtn.disabled=true; }
+      stopBtn.disabled=true;
+      if(pendingRelayout)relayout(); }
     const xPointer={};
+    // épaves : cases occupées par les trains détruits, infranchissables
+    const wrecks=new Set();
+    // cases réellement occupées par un train (loco + wagons sortis), avec direction
+    function occCells(st){
+      const out=[];
+      const max=Math.min(st.trail.length, st.emerged);
+      for(let k=0;k<max;k++){const seg=st.trail[k];out.push({r:seg.r,c:seg.c,d:seg.d});}
+      return out;
+    }
+    function addDebris(r,c){
+      const d=document.createElement('div');
+      d.className='debris';d.textContent='🔥';
+      d.style.left=(c*s)+'px';d.style.top=(r*s)+'px';
+      board.appendChild(d);
+    }
+    function markWrecks(st){occCells(st).forEach(p=>wrecks.add(obKey(p.r,p.c)));}
 
     // état de chaque train.
     // trail = liste des cases occupées, index 0 = locomotive, puis wagons.
     // emerged = nombre de segments déjà sortis de la gare (croît jusqu'à 1+NWAGONS).
     // headDone = la locomotive a atteint l'arrivée (le train rentre alors en gare).
-    const state=CARS.map((car,i)=>{
-      const t=trainEls[i];
+    const state=activeCars().map(car=>{
+      const t=trainEls[car.id];
       t.loco.classList.remove('crashed');
       t.loco.querySelector('.body').style.transform=carTransform[1];
       t.loco.style.display='flex';
@@ -974,13 +1099,7 @@
         const rel=(entryAbs - cell.rot + 4) % 4;
         return (rel===0||rel===1) ? 1 : 2;
       }
-      function cellsOf(st){
-        // cases réellement occupées (loco + wagons visibles), avec direction
-        const out=[];
-        const max=Math.min(st.trail.length, st.emerged);
-        for(let k=0;k<max;k++){const seg=st.trail[k];out.push({r:seg.r,c:seg.c,d:seg.d});}
-        return out;
-      }
+      function cellsOf(st){ return occCells(st); }
       // Un train dont la locomotive est déjà entrée en gare (headDone) est en phase de
       // rangement : ses wagons rentrent et ne provoquent plus d'accident.
       const activeTrains=state.filter(st=>st.alive&&!st.done&&!st.headDone);
@@ -1011,7 +1130,17 @@
         endRace();
         const arrived=state.filter(st=>st.done).length;
         const lost=state.filter(st=>!st.alive&&!st.done).length;
-        if(arrived===state.length){confetti();return flash('🏁 Bravo ! Tous les trains sont arrivés !','win');}
+        if(arrived===state.length){
+          confetti();
+          const minTiles=activeCars().reduce((a,car)=>a+(bfsLen(car.start,car.end)||0),0);
+          const used=tileCount();
+          let stars='⭐';
+          if(minTiles>0){
+            if(used<=Math.ceil(minTiles*1.15))stars='⭐⭐⭐';
+            else if(used<=Math.ceil(minTiles*1.5))stars='⭐⭐';
+          }
+          return flash(`🏁 Bravo ! Tous les trains sont arrivés ! ${stars} (${used} tuiles)`,'win');
+        }
         if(arrived>0){confetti();return flash(`🏁 ${arrived} train(s) arrivé(s), ${lost} détruit(s).`,'win');}
         lightning();return flash('⚡ Aucun train n\u2019a atteint sa gare.','fail');
       }
@@ -1087,20 +1216,20 @@
 
     function eliminate(st, kind, msg){
       st.alive=false;
+      markWrecks(st);   // les cases du train détruit deviennent infranchissables
+      const occ=occCells(st);
       const sCell=cells[st.r] && cells[st.r][st.c];
       if(kind==='explode'){
         st.loco.classList.add('crashed');
         const boom=document.createElement('div');boom.className='boom';boom.textContent='💥';
         boom.style.left=(st.c*s)+'px';boom.style.top=(st.r*s)+'px';
         board.appendChild(boom);
+        if(sCell)sCell.classList.add('deadend-flash');   // signale la case fautive
         if(navigator.vibrate)navigator.vibrate(600);
         setTimeout(()=>{
           st.loco.style.display='none';
           st.wagons.forEach(w=>w.style.display='none');
-          const debris=document.createElement('div');
-          debris.className='debris';debris.textContent='🔥';
-          debris.style.left=(st.c*s)+'px';debris.style.top=(st.r*s)+'px';
-          board.appendChild(debris);
+          occ.forEach(p=>addDebris(p.r,p.c));
         },700);
       }else if(kind==='deadend'){
         if(sCell){sCell.classList.add('deadend-flash');}
@@ -1140,7 +1269,12 @@
           eliminate(st,'explode', off?'rails hors plateau 🚧':'rails non connectés 🔌');
           return false;
         }
-        return {d, nr:st.r+DR[d], nc:st.c+DC[d]};
+        const nr=st.r+DR[d], nc=st.c+DC[d];
+        if(wrecks.has(obKey(nr,nc))){
+          eliminate(st,'explode','a percuté une épave 🔥');
+          return false;
+        }
+        return {d, nr, nc};
       }
       st.pendingTee=null;
       const usable=openDirs(cell).filter(d=>d!==back && reachable(d));
@@ -1153,23 +1287,31 @@
         else eliminate(st,'deadend','cul-de-sac');
         return false;
       }
-      const d=usable[0];
+      // évite une épave s'il existe une autre sortie ; sinon collision
+      const clear=usable.filter(d=>!wrecks.has(obKey(st.r+DR[d],st.c+DC[d])));
+      if(!clear.length){
+        eliminate(st,'explode','a percuté une épave 🔥');
+        return false;
+      }
+      const d=clear[0];
       return {d, nr:st.r+DR[d], nc:st.c+DC[d]};
     }
 
     function crashTrains(cr,cc,a,b){
       a.alive=false;b.alive=false;
+      markWrecks(a);markWrecks(b);
+      const occA=occCells(a), occB=occCells(b);
       [a,b].forEach(t=>{t.loco.classList.add('crashed');t.wagons.forEach(w=>w.classList.add('crashed'));});
       const boom=document.createElement('div');boom.className='boom big';boom.textContent='💥';
       boom.style.left=(cc*s)+'px';boom.style.top=(cr*s)+'px';
       board.appendChild(boom);
+      const hCell=cells[cr] && cells[cr][cc];
+      if(hCell)hCell.classList.add('deadend-flash');   // signale la case de la collision
       setTimeout(()=>{
         [a,b].forEach(t=>{
           t.loco.style.display='none';t.wagons.forEach(w=>w.style.display='none');
-          const debris=document.createElement('div');debris.className='debris';debris.textContent='🔥';
-          debris.style.left=(t.c*s)+'px';debris.style.top=(t.r*s)+'px';
-          board.appendChild(debris);
         });
+        occA.concat(occB).forEach(p=>addDebris(p.r,p.c));
       },700);
       if(navigator.vibrate)navigator.vibrate(900);
       flash('💥 Collision entre trains !','fail');
@@ -1178,7 +1320,14 @@
     wait(0.85, tick);
   }
 
-  window.addEventListener('resize',()=>{TS=setTileSize();draw();});
+  const relayout=()=>{
+    if(running){pendingRelayout=true;return;}   // pendant la course, TS est figé (sprites calés dessus)
+    pendingRelayout=false;
+    TS=setTileSize();
+    board.style.gridTemplateColumns=`repeat(${COLS},var(--ts))`;draw();};
+  let pendingRelayout=false;
+  window.addEventListener('resize',relayout);
+  window.addEventListener('orientationchange',()=>setTimeout(relayout,150));
 })();
 
 // Enregistrement du service worker (active l'installation PWA et le hors-ligne)

@@ -1,5 +1,5 @@
 // Service worker : met en cache les fichiers pour le hors-ligne et l'installation PWA.
-const CACHE='meca-v34';
+const CACHE='meca-v37';
 const FILES=['./','./index.html','./manifest.json','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install',e=>{
@@ -15,12 +15,16 @@ self.addEventListener('activate',e=>{
 });
 
 self.addEventListener('fetch',e=>{
+  if(e.request.method!=='GET')return;   // ne jamais intercepter/cacher les non-GET
   // stratégie : réseau d'abord, puis cache en secours (hors-ligne)
   e.respondWith(
     fetch(e.request)
       .then(resp=>{
-        const copy=resp.clone();
-        caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{});
+        // on ne met en cache que les réponses valides (évite de cacher des 404/erreurs)
+        if(resp.ok){
+          const copy=resp.clone();
+          caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{});
+        }
         return resp;
       })
       .catch(()=>caches.match(e.request).then(r=>r||caches.match('./index.html')))

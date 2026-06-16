@@ -235,6 +235,10 @@
       <button class="train-btn" data-n="2">2 🚂</button>
       <button class="train-btn active" data-n="3">3 🚂</button>
     </div>
+    <div class="obst-row" id="wagons-row">
+      <span class="obst-label">Wagons 🚃 : <b id="wagon-val">2</b></span>
+      <input type="range" id="wagon-slider" min="1" max="5" value="2" step="1">
+    </div>
     <div class="play-row">
       <button id="go" class="btn-go">▶ Lancer</button>
       <button id="pause" class="btn-pause" disabled>⏸ Pause</button>
@@ -247,7 +251,7 @@
       <button class="speed-btn" data-mult="0.5">🐇 Rapide</button>
     </div>
     <div id="msg"></div>
-    <p class="hint">🚂 <b>rouge</b> A1→B1 &nbsp;•&nbsp; 🚂 <b>bleu</b> A2→B2 &nbsp;•&nbsp; 🚂 <b>jaune</b> A3→B3. <b>Obstacles</b> place les gares, <b>à toi de tracer les rails</b>. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : sortie des T/Y • <b>↩️</b> : annuler. Chaque train = loco + 2 wagons. Évite les collisions 💥 — <b>les épaves bloquent la voie</b> ! Moins de tuiles = plus d'étoiles ⭐</p>
+    <p class="hint">🚂 <b>rouge</b> A1→B1 &nbsp;•&nbsp; 🚂 <b>bleu</b> A2→B2 &nbsp;•&nbsp; 🚂 <b>jaune</b> A3→B3. <b>Obstacles</b> place les gares, <b>à toi de tracer les rails</b>. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : sortie des T/Y • <b>↩️</b> : annuler. Chaque train = loco + wagons (réglables 1→5). Évite les collisions 💥 — <b>les épaves bloquent la voie</b> ! Moins de tuiles = plus d'étoiles ⭐</p>
   </div>
 
   <!-- Modale Circuits -->
@@ -341,7 +345,8 @@
   const obstacles=Array.from({length:ROWS},()=>Array(COLS).fill(null));
 
   // Trois trains ; positions gare départ/arrivée tirées au sort.
-  const NWAGONS=2;
+  const MAXWAGONS=5;      // nombre maxi de wagons (sprites pré-créés)
+  let nWagons=2;          // nombre de wagons réglable (1 à 5)
   const CARS=[
     {id:0, name:'Rouge', color:'#e8403a', emoji:'🚂', start:{r:ROWS-1,c:0}, end:{r:0,c:COLS-1}},
     {id:1, name:'Bleu',  color:'#4d8cee', emoji:'🚂', start:{r:0,c:0}, end:{r:ROWS-1,c:COLS-1}},
@@ -354,6 +359,12 @@
   function syncTrainsUI(){
     document.querySelectorAll('.train-btn').forEach(b=>
       b.classList.toggle('active',parseInt(b.dataset.n,10)===nTrains));
+  }
+  function syncWagonsUI(){
+    const sl=document.getElementById('wagon-slider');
+    const v=document.getElementById('wagon-val');
+    if(sl)sl.value=nWagons;
+    if(v)v.textContent=nWagons;
   }
 
   const rot=(d,t)=>(d+t)%4;
@@ -449,6 +460,7 @@
   // repère un point (start/end) -> {carIndex, kind} pour le marquage
   function markerAt(r,c){
     for(const car of activeCars()){
+      if(!car.start||!car.end)continue;
       if(car.start.r===r&&car.start.c===c) return {car, kind:'A'};
       if(car.end.r===r&&car.end.c===c) return {car, kind:'B'};
     }
@@ -489,7 +501,7 @@
     };
     board.appendChild(el);cells[r][c]=el;
   }}
-  // Chaque train : 1 locomotive + NWAGONS wagons. Chaque segment est un élément positionné.
+  // Chaque train : 1 locomotive + jusqu'à MAXWAGONS wagons (nWagons utilisés). Chaque segment est un élément positionné.
   // trainEls[i] = { loco, wagons:[...] }
   const trainEls=CARS.map(car=>{
     const loco=document.createElement('div');
@@ -498,7 +510,7 @@
     loco.innerHTML=`<span class="halo"></span><span class="body">${car.emoji}</span>`;
     board.appendChild(loco);
     const wagons=[];
-    for(let w=0;w<NWAGONS;w++){
+    for(let w=0;w<MAXWAGONS;w++){
       const wg=document.createElement('div');
       wg.className='car-sprite wagon';wg.style.display='none';
       wg.style.setProperty('--halo',car.color);
@@ -614,8 +626,8 @@
     }
     const obs=[];
     for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)obs.push(obstacles[r][c]||'');
-    const cars=CARS.map(c=>({s:[c.start.r,c.start.c],e:[c.end.r,c.end.c]}));
-    return JSON.stringify({g:cells.join('|'), o:obs.join('|'), c:cars, n:nTrains});
+    const cars=CARS.map(c=>(c.start&&c.end)?{s:[c.start.r,c.start.c],e:[c.end.r,c.end.c]}:null);
+    return JSON.stringify({g:cells.join('|'), o:obs.join('|'), c:cars, n:nTrains, w:nWagons});
   }
   function deserializeGrid(str){
     if(!str||typeof str!=='string')return false;
@@ -637,11 +649,14 @@
     for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)obstacles[r][c]=null;
     if(data.o){const op=data.o.split('|');
       for(let i=0;i<op.length&&i<ROWS*COLS;i++)if(op[i])obstacles[Math.floor(i/COLS)][i%COLS]=op[i];}
-    // positions voitures
-    if(Array.isArray(data.c)){data.c.forEach((cc,i)=>{if(CARS[i]&&cc){
-      CARS[i].start={r:cc.s[0],c:cc.s[1]};CARS[i].end={r:cc.e[0],c:cc.e[1]};}});}
+    // positions voitures (null = gare effacée)
+    if(Array.isArray(data.c)){data.c.forEach((cc,i)=>{if(!CARS[i])return;
+      if(cc){CARS[i].start={r:cc.s[0],c:cc.s[1]};CARS[i].end={r:cc.e[0],c:cc.e[1]};}
+      else{CARS[i].start=null;CARS[i].end=null;}});}
     // nombre de trains actifs
     if(data.n){nTrains=Math.min(3,Math.max(1,data.n));syncTrainsUI();}
+    // nombre de wagons
+    if(data.w){nWagons=Math.min(MAXWAGONS,Math.max(1,data.w));syncWagonsUI();}
     return true;
   }
 
@@ -743,7 +758,14 @@
   document.querySelectorAll('.train-btn').forEach(b=>{
     b.onclick=()=>{
       if(running)return;
+      const prev=nTrains;
       nTrains=parseInt(b.dataset.n,10);
+      pushUndo();
+      // gares des trains qui ne jouent plus : effacées
+      CARS.forEach((car,i)=>{if(i>=nTrains){car.start=null;car.end=null;}});
+      // trains réactivés sans gares : on leur en attribue sans toucher au tracé
+      if(nTrains>prev && !ensureGares())
+        flash('Pas de place pour les gares — clique sur ⛰️ Obstacles','fail');
       syncTrainsUI();draw();autosave();
     };
   });
@@ -759,6 +781,16 @@
   obstSlider.addEventListener('input',()=>{
     nObstacles=parseInt(obstSlider.value,10);
     obstVal.textContent=nObstacles;
+  });
+
+  // ---- Curseur nombre de wagons ----
+  const wagonSlider=document.getElementById('wagon-slider');
+  const wagonVal=document.getElementById('wagon-val');
+  wagonSlider.addEventListener('input',()=>{
+    if(running)return;
+    nWagons=parseInt(wagonSlider.value,10);
+    wagonVal.textContent=nWagons;
+    autosave();
   });
 
   // ---- Génération d'obstacles : helpers ----
@@ -828,7 +860,7 @@
     const obst=placeObstacles(nObst, used);
     function freeCell(){let r,c,t=0;do{r=Math.floor(Math.random()*ROWS);c=Math.floor(Math.random()*COLS);t++;}while(used.has(obKey(r,c))&&t<300);if(used.has(obKey(r,c)))return null;used.add(obKey(r,c));return {r,c};}
     const pairs=[];
-    for(let i=0;i<CARS.length;i++){
+    for(let i=0;i<nTrains;i++){
       let s,e,tries=0;
       do{s=freeCell();e=freeCell();tries++;}while(s&&e&&distM(s,e)<ROWS-2 && tries<60);
       if(!s||!e)return null;
@@ -848,7 +880,7 @@
       if(!setup)continue;
       const {pairs,obst}=setup;
       const obstSet=new Set(obst.map(o=>obKey(o.r,o.c)));
-      const tmp=activeCars().map((car,i)=>({start:pairs[i].start,end:pairs[i].end}));
+      const tmp=pairs.map(p=>({start:p.start,end:p.end}));
       const endpoints=new Set();
       tmp.forEach(c=>{endpoints.add(obKey(c.start.r,c.start.c));endpoints.add(obKey(c.end.r,c.end.c));});
       let solvable=true;
@@ -862,7 +894,10 @@
       }
       if(!solvable)continue;
       pushUndo();
-      CARS.forEach((car,i)=>{car.start=pairs[i].start;car.end=pairs[i].end;});
+      CARS.forEach((car,i)=>{
+        if(i<nTrains){car.start=pairs[i].start;car.end=pairs[i].end;}
+        else{car.start=null;car.end=null;}   // gares des trains qui ne jouent pas : effacées
+      });
       for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){obstacles[r][c]=null;grid[r][c]=null;}
       obst.forEach(o=>{obstacles[o.r][o.c]=o.emoji;});
       flash('\u26f0\ufe0f Obstacles plac\u00e9s \u2014 \u00e0 toi de tracer les routes !','win');
@@ -893,6 +928,36 @@
       }
     }
     return null;
+  }
+
+  // Place des gares pour les trains actifs qui n'en ont pas (réactivation),
+  // sur des cases libres (ni obstacle, ni rail, ni autre gare), chemin possible.
+  // Ne touche pas au tracé existant. Renvoie false si pas de place.
+  function ensureGares(){
+    const occupied=new Set();
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+      if(obstacles[r][c]||grid[r][c])occupied.add(obKey(r,c));
+    }
+    activeCars().forEach(car=>{
+      if(car.start)occupied.add(obKey(car.start.r,car.start.c));
+      if(car.end)occupied.add(obKey(car.end.r,car.end.c));
+    });
+    let allOk=true;
+    for(const car of activeCars()){
+      if(car.start&&car.end)continue;
+      let placed=false;
+      for(let t=0;t<400&&!placed;t++){
+        const s={r:(Math.random()*ROWS)|0,c:(Math.random()*COLS)|0};
+        const e={r:(Math.random()*ROWS)|0,c:(Math.random()*COLS)|0};
+        const ks=obKey(s.r,s.c),ke=obKey(e.r,e.c);
+        if(ks===ke||occupied.has(ks)||occupied.has(ke))continue;
+        if(distM(s,e)<ROWS-2)continue;
+        if(!bfsLen(s,e))continue;          // un chemin physique existe (hors obstacles)
+        car.start=s;car.end=e;occupied.add(ks);occupied.add(ke);placed=true;
+      }
+      if(!placed)allOk=false;
+    }
+    return allOk;
   }
 
   document.getElementById('gen-obst').onclick=generateObstacles;
@@ -1014,6 +1079,8 @@
   }
 
   function runRace(){
+    if(activeCars().some(c=>!c.start||!c.end)){
+      flash('Place les gares : clique sur ⛰️ Obstacles','fail');return;}
     running=true;paused=false;resumeFn=null;
     raceToken++;
     pauseBtn.disabled=false;pauseBtn.textContent='⏸ Pause';
@@ -1047,7 +1114,7 @@
 
     // état de chaque train.
     // trail = liste des cases occupées, index 0 = locomotive, puis wagons.
-    // emerged = nombre de segments déjà sortis de la gare (croît jusqu'à 1+NWAGONS).
+    // emerged = nombre de segments déjà sortis de la gare (croît jusqu'à 1+nWagons).
     // headDone = la locomotive a atteint l'arrivée (le train rentre alors en gare).
     const state=activeCars().map(car=>{
       const t=trainEls[car.id];
@@ -1068,7 +1135,7 @@
         return flash(`Pose une route sur la gare A${st.car.id+1} !`,'fail');}
     }
 
-    const totalLen=1+NWAGONS;
+    const totalLen=1+nWagons;
 
     function tick(){
       // 1) calcule le mouvement de la tête de chaque train actif
@@ -1157,10 +1224,10 @@
       }else{
         st.loco.style.display='none';
       }
-      for(let w=0;w<NWAGONS;w++){
+      for(let w=0;w<MAXWAGONS;w++){
         const seg=st.trail[w+1];
         const el=st.wagons[w];
-        if(seg && (w+1)<st.emerged){
+        if(w<nWagons && seg && (w+1)<st.emerged){
           const wasHidden = el.style.display==='none' || el.dataset.shown!=='1';
           if(wasHidden){
             // apparition : on place sans transition pour éviter un saut depuis l'origine

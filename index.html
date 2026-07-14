@@ -29,7 +29,8 @@
     color:var(--txt);
     display:flex;flex-direction:column;align-items:center;
     padding:8px 8px 14px;gap:8px;
-    overflow:hidden;
+    overflow-x:hidden;overflow-y:auto;
+    overscroll-behavior-y:contain;
   }
   h1{
     font-size:18px;letter-spacing:.5px;text-align:center;
@@ -235,17 +236,23 @@
 
   <div class="controls">
     <div class="palette" id="palette"></div>
-    <div class="obst-row">
-      <span class="obst-label">Obstacles : <b id="obst-val">36</b></span>
-      <input type="range" id="obst-slider" min="36" max="60" value="36" step="2">
-      <span class="obst-label">🛤️ <b id="tiles">0</b></span>
+    <div class="play-row">
+      <button id="go" class="btn-go">▶ Lancer</button>
+      <button id="pause" class="btn-pause" disabled>⏸ Pause</button>
+      <button id="stop" class="btn-stop" disabled>⏹ Stop</button>
     </div>
+    <div id="msg"></div>
     <div class="tools">
       <button id="undo" disabled>↩️ Annuler</button>
       <button id="gen-obst">⛰️ Obstacles</button>
       <button id="erase">🧽 Gomme</button>
       <button id="clear">🗑️ Effacer</button>
       <button id="save">💾 Circuits</button>
+    </div>
+    <div class="obst-row">
+      <span class="obst-label">Obstacles : <b id="obst-val">36</b></span>
+      <input type="range" id="obst-slider" min="36" max="60" value="36" step="2">
+      <span class="obst-label">🛤️ <b id="tiles">0</b></span>
     </div>
     <div class="speed" id="trains-row">
       <span class="speed-label">Trains :</span>
@@ -257,18 +264,12 @@
       <span class="obst-label">Wagons 🚃 : <b id="wagon-val">2</b></span>
       <input type="range" id="wagon-slider" min="1" max="5" value="2" step="1">
     </div>
-    <div class="play-row">
-      <button id="go" class="btn-go">▶ Lancer</button>
-      <button id="pause" class="btn-pause" disabled>⏸ Pause</button>
-      <button id="stop" class="btn-stop" disabled>⏹ Stop</button>
-    </div>
     <div class="speed" id="speed">
       <span class="speed-label">Vitesse :</span>
       <button class="speed-btn" data-mult="2">🐢 Lent</button>
       <button class="speed-btn active" data-mult="1">Normal</button>
       <button class="speed-btn" data-mult="0.5">🐇 Rapide</button>
     </div>
-    <div id="msg"></div>
     <p class="hint">🚂 <b>rouge</b> A1→B1 &nbsp;•&nbsp; 🚂 <b>bleu</b> A2→B2 &nbsp;•&nbsp; 🚂 <b>jaune</b> A3→B3. <b>Obstacles</b> place les gares, <b>à toi de tracer les rails</b>. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : sortie des T/Y • <b>↩️</b> : annuler. Chaque train = loco + wagons (réglables 1→5). Évite les collisions 💥 — <b>les épaves bloquent la voie</b> ! Moins de tuiles = plus d'étoiles ⭐. <b>🏠</b> : changer de scénario (fleuve 🌊, gare C 🟠) ou de taille de carte.</p>
   </div>
 
@@ -528,6 +529,8 @@
   function syncScenarioUI(){
     // la tuile Pont n'apparaît que dans le scénario fleuve
     ptileEls.bridge.style.display = scenario==='river' ? '' : 'none';
+    // 8 colonnes quand le pont est visible : la palette tient sur une seule rangée
+    palette.style.gridTemplateColumns=`repeat(${scenario==='river'?8:7},1fr)`;
     if(scenario!=='river' && selectedType==='bridge'){
       selectedType='straight';
       document.querySelectorAll('.ptile').forEach(x=>x.classList.remove('active'));
@@ -914,7 +917,7 @@
       if(nTrains>prev && !ensureGares())
         flash('Pas de place pour les gares — clique sur ⛰️ Obstacles','fail');
       // en mode fleuve, le quota de ponts suit le nombre de trains
-      if(scenario==='river')bridgeMax=Math.max(bridgeMax,nTrains+1);
+      if(scenario==='river')bridgeMax=Math.max(bridgeMax,nTrains+2);
       syncTrainsUI();draw();autosave();
     };
   });
@@ -940,7 +943,7 @@
   });
   function newGame(sc,size){
     scenario=sc;
-    bridgeMax = sc==='river' ? nTrains+1 : 0;
+    bridgeMax = sc==='river' ? nTrains+2 : 0;
     if(size!==ROWS||size!==COLS)resizeBoard(size,size);
     else{
       for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){grid[r][c]=null;obstacles[r][c]=null;water[r][c]=false;}

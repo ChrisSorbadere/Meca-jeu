@@ -56,6 +56,13 @@
   .cell svg{width:100%;height:100%;display:block}
   .cell.start,.cell.end{outline:2px solid;outline-offset:-2px;border-radius:3px}
   .cell.via{outline:2px dashed;outline-offset:-2px;border-radius:3px}
+  .cell.live-switch{box-shadow:inset 0 0 0 2px rgba(244,211,94,.5);animation:swpulse 1.6s ease-in-out infinite}
+  @keyframes swpulse{50%{box-shadow:inset 0 0 0 3px rgba(244,211,94,.95)}}
+  .cell.switched{filter:brightness(1.7)}
+  .pickup{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:calc(var(--ts)*0.55);pointer-events:none;z-index:2;
+    filter:drop-shadow(0 1px 2px rgba(0,0,0,.6));animation:pkbob 1.4s ease-in-out infinite}
+  @keyframes pkbob{50%{transform:translateY(-2px)}}
   .cell.water{background:#12314e}
   .water-emoji{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     font-size:calc(var(--ts)*0.5);opacity:.75;pointer-events:none}
@@ -270,7 +277,7 @@
       <button class="speed-btn active" data-mult="1">Normal</button>
       <button class="speed-btn" data-mult="0.5">🐇 Rapide</button>
     </div>
-    <p class="hint">🚂 <b>rouge</b> A1→B1 &nbsp;•&nbsp; 🚂 <b>bleu</b> A2→B2 &nbsp;•&nbsp; 🚂 <b>jaune</b> A3→B3. <b>Obstacles</b> place les gares, <b>à toi de tracer les rails</b>. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : sortie des T/Y • <b>↩️</b> : annuler. Chaque train = loco + wagons (réglables 1→5). Évite les collisions 💥 — <b>les épaves bloquent la voie</b> ! Moins de tuiles = plus d'étoiles ⭐. <b>🏠</b> : changer de scénario (fleuve 🌊, gare C 🟠) ou de taille de carte.</p>
+    <p class="hint">🚂 <b>rouge</b> A1→B1 &nbsp;•&nbsp; 🚂 <b>bleu</b> A2→B2 &nbsp;•&nbsp; 🚂 <b>jaune</b> A3→B3. <b>Obstacles</b> place les gares, <b>à toi de tracer les rails</b>. <b>Touche</b> : poser • <b>Re-touche</b> : pivoter • <b>Appui long</b> : sortie des T/Y • <b>↩️</b> : annuler. <b>Pendant la course</b>, touche un aiguillage T/Y (surligné ✨) pour inverser sa prochaine sortie ! Chaque train = loco + wagons (réglables 1→5). Évite les collisions 💥 — <b>les épaves bloquent la voie</b> ! Moins de tuiles = plus d'étoiles ⭐. <b>🏠</b> : changer de scénario (fleuve 🌊, gare C 🟠, collecte 🚃) ou de taille de carte.</p>
   </div>
 
   <!-- Modale Circuits -->
@@ -304,6 +311,10 @@
       <div class="scen" data-sc="via">
         <span class="scen-ico">🟠</span>
         <span><b>Gare intermédiaire</b><br><small>Chaque train doit passer par sa gare C avant d'arriver en B.</small></span>
+      </div>
+      <div class="scen" data-sc="collect">
+        <span class="scen-ico">🚃</span>
+        <span><b>Wagons à collecter</b><br><small>Ramasse TOUS les wagons garés : le train s'allonge à chaque prise !</small></span>
       </div>
       <p class="wsub">Taille de la carte :</p>
       <div class="sizes">
@@ -408,6 +419,9 @@
   const WAGON_EMOJI='🚃';
   // Nombre de trains actifs (difficulté). Les trains au-delà sont ignorés.
   let nTrains=3;
+  // Wagons à collecter (scénario 'collect') : liste de {r,c} posés sur la carte
+  let pickups=[];
+  const pickupAt=(r,c)=>pickups.some(p=>p.r===r&&p.c===c);
   const activeCars=()=>CARS.slice(0,nTrains);
   function syncTrainsUI(){
     document.querySelectorAll('.train-btn').forEach(b=>
@@ -538,9 +552,12 @@
     }
     const lb=document.getElementById('scen-label');
     if(lb){
-      const names={classic:'🛤️ Classique',river:'🌊 Fleuve',via:'🟠 Gare C'};
+      const names={classic:'🛤️ Classique',river:'🌊 Fleuve',via:'🟠 Gare C',collect:'🚃 Collecte'};
       lb.textContent=`${names[scenario]||''} · ${ROWS}×${COLS}`;
     }
+    // en collecte, le train part loco seule : le réglage wagons ne s'applique pas
+    const wr=document.getElementById('wagons-row');
+    if(wr)wr.style.display = scenario==='collect' ? 'none' : '';
   }
 
   // repère un point (start/end) -> {carIndex, kind} pour le marquage
@@ -584,7 +601,8 @@
     };
     el.onclick=(e)=>{
       if(suppressClick){suppressClick=false;e.preventDefault();return;}
-      if(!running)cellClick(r,c);
+      if(running)raceTap(r,c);
+      else cellClick(r,c);
     };
     return el;
   }
@@ -604,6 +622,14 @@
   buildBoard();
   // Chaque train : 1 locomotive + jusqu'à MAXWAGONS wagons (nWagons utilisés). Chaque segment est un élément positionné.
   // trainEls[i] = { loco, wagons:[...] }
+  function makeWagonSprite(car){
+    const wg=document.createElement('div');
+    wg.className='car-sprite wagon';wg.style.display='none';
+    wg.style.setProperty('--halo',car.color);
+    wg.innerHTML=`<span class="halo"></span><span class="body">${WAGON_EMOJI}</span>`;
+    board.appendChild(wg);
+    return wg;
+  }
   const trainEls=CARS.map(car=>{
     const loco=document.createElement('div');
     loco.className='car-sprite';loco.style.display='none';
@@ -611,14 +637,7 @@
     loco.innerHTML=`<span class="halo"></span><span class="body">${car.emoji}</span>`;
     board.appendChild(loco);
     const wagons=[];
-    for(let w=0;w<MAXWAGONS;w++){
-      const wg=document.createElement('div');
-      wg.className='car-sprite wagon';wg.style.display='none';
-      wg.style.setProperty('--halo',car.color);
-      wg.innerHTML=`<span class="halo"></span><span class="body">${WAGON_EMOJI}</span>`;
-      board.appendChild(wg);
-      wagons.push(wg);
-    }
+    for(let w=0;w<MAXWAGONS;w++)wagons.push(makeWagonSprite(car));
     return {loco, wagons};
   });
   // compat : carEls[i] = la locomotive (pour le code STOP existant)
@@ -723,6 +742,8 @@
         if(hasAlternance(cell.type)) ord=teeAlternance(cell);
         el.insertAdjacentHTML('afterbegin',tileSVG(cell.type,cell.rot,ord));
       }
+      // wagon garé (scénario collecte) : dessiné par-dessus le rail
+      if(pickupAt(r,c))el.insertAdjacentHTML('beforeend','<span class="pickup">🚃</span>');
     }
     const tc=document.getElementById('tiles');
     if(tc)tc.textContent=tileCount();
@@ -742,6 +763,20 @@
     const el=cells[r][c],badge=el.querySelector('.badge');
     el.innerHTML='';if(badge)el.appendChild(badge);
     el.insertAdjacentHTML('afterbegin',tileSVG(cell.type,cell.rot,{relIn, ordered}));
+  }
+  // Aiguillage manuel PENDANT la course : toucher un T/Y inverse sa prochaine sortie.
+  // raceXPointer pointe sur l'état d'alternance de la course en cours (null hors course).
+  let raceXPointer=null;
+  function raceTap(r,c){
+    const cell=grid[r][c];
+    if(!cell||!hasAlternance(cell.type))return;
+    cell.swap=!cell.swap;
+    const relIn=ALT_IN[cell.type];
+    const ptr=raceXPointer ? (raceXPointer[obKey(r,c)+'/'+relIn]||0) : 0;
+    redrawTeeWithPointer(r,c,relIn,ptr);
+    cells[r][c].classList.add('switched');
+    setTimeout(()=>cells[r][c].classList.remove('switched'),350);
+    if(navigator.vibrate)navigator.vibrate(20);
   }
   draw();
 
@@ -766,7 +801,8 @@
       return o;
     });
     return JSON.stringify({g:cells.join('|'), o:obs.join('|'), wt, c:cars,
-      n:nTrains, w:nWagons, sc:scenario, R:ROWS, C:COLS, bm:bridgeMax});
+      n:nTrains, w:nWagons, sc:scenario, R:ROWS, C:COLS, bm:bridgeMax,
+      pk:pickups.map(p=>p.r+','+p.c).join(';')});
   }
   function deserializeGrid(str){
     if(!str||typeof str!=='string')return false;
@@ -806,6 +842,12 @@
     // scénario + ponts
     scenario=data.sc||'classic';
     bridgeMax=data.bm||0;
+    // wagons à collecter
+    pickups=[];
+    if(data.pk){data.pk.split(';').forEach(s=>{
+      const [r,c]=s.split(',').map(Number);
+      if(!isNaN(r)&&!isNaN(c)&&r>=0&&r<ROWS&&c>=0&&c<COLS)pickups.push({r,c});
+    });}
     syncScenarioUI();
     return true;
   }
@@ -1163,7 +1205,27 @@
         }
         if(!viasOk)continue;
       }
+      // scénario 'collect' : semer des wagons à ramasser sur des cases libres et accessibles
+      let newPickups=[];
+      if(scenario==='collect'){
+        const K=Math.max(4,ROWS-5+nTrains);   // 10x10/1train:5 … 14x14/3trains:12
+        const taken=new Set(obstSet);endpoints.forEach(k=>taken.add(k));
+        for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(water[r][c])taken.add(obKey(r,c));
+        const blocked=new Set(obstSet);
+        for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(water[r][c])blocked.add(obKey(r,c));
+        let guard=0;
+        while(newPickups.length<K && guard++<600){
+          const p={r:Math.floor(Math.random()*ROWS),c:Math.floor(Math.random()*COLS)};
+          const k=obKey(p.r,p.c);
+          if(taken.has(k))continue;
+          // accessible depuis au moins une gare de départ
+          if(!tmp.some(car=>reachAvoid(car.start,p,blocked)))continue;
+          taken.add(k);newPickups.push(p);
+        }
+        if(newPickups.length<3)continue;   // trop peu de place : nouvelle tentative
+      }
       pushUndo();
+      pickups=newPickups;
       CARS.forEach((car,i)=>{
         if(i<nTrains){car.start=pairs[i].start;car.end=pairs[i].end;
           car.via=(vias&&vias[i])?vias[i]:null;}
@@ -1235,9 +1297,10 @@
   document.getElementById('gen-obst').onclick=generateObstacles;
   eraseBtn.onclick=()=>{eraseMode=!eraseMode;eraseBtn.style.outline=eraseMode?'2px solid var(--accent)':'';};
   document.getElementById('clear').onclick=()=>{if(running)return;
-    const hasContent=grid.some(row=>row.some(Boolean))||obstacles.some(row=>row.some(Boolean));
+    const hasContent=grid.some(row=>row.some(Boolean))||obstacles.some(row=>row.some(Boolean))||pickups.length>0;
     if(hasContent)pushUndo();
     for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){grid[r][c]=null;obstacles[r][c]=null;}
+    pickups=[];
     flash('',null);draw();autosave();};
 
   function flash(t,cls){const m=document.getElementById('msg');m.textContent=t;m.className=cls||'';}
@@ -1363,10 +1426,21 @@
     draw();
     const s=step1();
     function endRace(){ running=false; paused=false; resumeFn=null;
+      raceXPointer=null;
+      document.querySelectorAll('.live-switch').forEach(e=>e.classList.remove('live-switch'));
+      // les wagons garés réapparaissent (la course travaille sur une copie)
+      pickups.forEach(p=>{
+        const el=cells[p.r]&&cells[p.r][p.c];
+        if(el&&!el.querySelector('.pickup'))el.insertAdjacentHTML('beforeend','<span class="pickup">🚃</span>');
+      });
       pauseBtn.disabled=true; pauseBtn.textContent='⏸ Pause';
       stopBtn.disabled=true;
       if(pendingRelayout)relayout(); }
     const xPointer={};
+    raceXPointer=xPointer;
+    // surligne les aiguillages pilotables (T/Y) pendant la course
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)
+      if(grid[r][c]&&hasAlternance(grid[r][c].type))cells[r][c].classList.add('live-switch');
     // épaves : cases occupées par les trains détruits, infranchissables
     const wrecks=new Set();
     // cases réellement occupées par un train (loco + wagons sortis), avec direction
@@ -1386,7 +1460,8 @@
 
     // état de chaque train.
     // trail = liste des cases occupées, index 0 = locomotive, puis wagons.
-    // emerged = nombre de segments déjà sortis de la gare (croît jusqu'à 1+nWagons).
+    // emerged = nombre de segments déjà sortis de la gare (croît jusqu'à maxLen).
+    // maxLen = longueur du train (1+nWagons ; en collecte : 1, puis +1 par wagon accroché).
     // headDone = la locomotive a atteint l'arrivée (le train rentre alors en gare).
     const state=activeCars().map(car=>{
       const t=trainEls[car.id];
@@ -1400,15 +1475,16 @@
               trail:[{r:car.start.r,c:car.start.c,d:1}],
               r:car.start.r, c:car.start.c, cameFrom:-1,
               alive:true, headDone:false, done:false, emerged:1, pendingTee:null,
+              maxLen: scenario==='collect' ? 1 : 1+nWagons,
               viaDone: !(scenario==='via' && car.via)};
     });
+    // wagons garés restant à ramasser pendant CETTE course (la carte n'est pas modifiée)
+    const livePickups=new Set(pickups.map(p=>obKey(p.r,p.c)));
 
     for(const st of state){
       if(!grid[st.r][st.c]){endRace();
         return flash(`Pose une route sur la gare A${st.car.id+1} !`,'fail');}
     }
-
-    const totalLen=1+nWagons;
 
     function tick(){
       // 1) calcule le mouvement de la tête de chaque train actif
@@ -1471,7 +1547,13 @@
         const arrived=state.filter(st=>st.done).length;
         const lost=state.filter(st=>!st.alive&&!st.done).length;
         if(arrived===state.length){
+          if(scenario==='collect' && livePickups.size>0){
+            return flash(`🚃 Tous les trains sont rentrés… mais il reste ${livePickups.size} wagon(s) à ramasser ! Réessaie.`,'fail');
+          }
           confetti();
+          if(scenario==='collect'){
+            return flash(`🏁 Bravo ! ${pickups.length} wagons ramassés et tous les trains à quai !`,'win');
+          }
           const minTiles=activeCars().reduce((a,car)=>{
             if(scenario==='via'&&car.via)
               return a+(bfsLen(car.start,car.via)||0)+(bfsLen(car.via,car.end)||0)-1;
@@ -1501,10 +1583,10 @@
       }else{
         st.loco.style.display='none';
       }
-      for(let w=0;w<MAXWAGONS;w++){
+      for(let w=0;w<st.wagons.length;w++){
         const seg=st.trail[w+1];
         const el=st.wagons[w];
-        if(w<nWagons && seg && (w+1)<st.emerged){
+        if(w<st.maxLen-1 && seg && (w+1)<st.emerged){
           const wasHidden = el.style.display==='none' || el.dataset.shown!=='1';
           if(wasHidden){
             // apparition : on place sans transition pour éviter un saut depuis l'origine
@@ -1539,9 +1621,22 @@
         st.pendingTee=null;
       }
       st.trail.unshift({r:m.nr,c:m.nc,d:m.d});
-      if(st.trail.length>totalLen)st.trail.pop();
+      // accrochage d'un wagon garé (scénario collecte)
+      const pkKey=obKey(m.nr,m.nc);
+      if(scenario==='collect' && livePickups.has(pkKey)){
+        livePickups.delete(pkKey);
+        st.maxLen++;
+        while(st.wagons.length<st.maxLen-1)st.wagons.push(makeWagonSprite(st.car));
+        const pkEl=cells[m.nr][m.nc].querySelector('.pickup');
+        if(pkEl)pkEl.remove();
+        cells[m.nr][m.nc].classList.add('switched');
+        setTimeout(()=>cells[m.nr][m.nc].classList.remove('switched'),350);
+        if(navigator.vibrate)navigator.vibrate(25);
+        flash(`🚃 ${st.car.name} a accroché un wagon ! Reste ${livePickups.size}`,null);
+      }
+      if(st.trail.length>st.maxLen)st.trail.pop();
       st.r=m.nr;st.c=m.nc;st.cameFrom=OPP[m.d];
-      if(st.emerged<totalLen)st.emerged++;
+      if(st.emerged<st.maxLen)st.emerged++;
       if(!st.viaDone && st.car.via && st.r===st.car.via.r && st.c===st.car.via.c){
         st.viaDone=true;
         flash(`🟠 ${st.car.name} : passage C validé !`,null);
